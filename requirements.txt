@@ -1,0 +1,19 @@
+# GemmaDesk — Python dependencies
+# Install: uv pip install -r requirements.txt
+#
+# System dependency (install separately):
+#   sudo apt install ffmpeg
+
+streamlit
+ollama
+langchain-community
+langchain-text-splitters
+langchain-ollama
+langchain-core
+chromadb
+pypdf
+openai-whisper
+protobuf<=3.20.3
+fastapi
+uvicorn
+httpx

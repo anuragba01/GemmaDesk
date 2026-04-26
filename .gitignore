@@ -1,0 +1,9 @@
+models/
+venv/
+open-notebook/
+uploaded_images/
+.venv/
+chroma_db/
+.uv_cache
+__pycache__/
+sample.txt
