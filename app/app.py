@@ -183,13 +183,6 @@ with st.sidebar:
 
 st.header("Chat")
 
-if stats["images"] > 0:
-    with st.expander(f"Indexed Images ({stats['images']})", expanded=False):
-        img_cols = st.columns(min(stats["images"], 4))
-        for i, path in enumerate(rag.image_paths):
-            if os.path.exists(path):
-                img_cols[i % 4].image(path, caption=os.path.basename(path), use_column_width=True)
-
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])

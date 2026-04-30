@@ -24,7 +24,13 @@ class GemmaEngine:
                     "content": [{"type": "text", "text": f"[SYSTEM]\n{system_text}"}],
                 })
 
-            for msg in payload.get("history", []):
+            history = payload.get("history", [])
+            image_paths = payload.get("image_paths", [])
+
+            for msg in history:
+                # Avoid anchoring a new visual turn to stale assistant text.
+                if image_paths and msg["role"] == "assistant":
+                    continue
                 conv.send_message({
                     "role": msg["role"],
                     "content": [{"type": "text", "text": msg["content"]}],
@@ -35,7 +41,7 @@ class GemmaEngine:
             if prompt_text:
                 content.append({"type": "text", "text": prompt_text})
 
-            for image_path in payload.get("image_paths", []):
+            for image_path in image_paths:
                 content.append({"type": "image", "path": image_path})
 
             response = conv.send_message({"role": "user", "content": content})
