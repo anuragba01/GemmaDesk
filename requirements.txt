@@ -4,16 +4,18 @@
 # System dependency (install separately):
 #   sudo apt install ffmpeg
 
+torch
+torchvision
+timm
+litert-lm
 streamlit
-ollama
+langchain-huggingface
+sentence-transformers
 langchain-community
 langchain-text-splitters
-langchain-ollama
 langchain-core
 chromadb
 pypdf
 openai-whisper
 protobuf<=3.20.3
-fastapi
 uvicorn
-httpx

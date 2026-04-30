@@ -1,3 +1,4 @@
+model/
 models/
 venv/
 open-notebook/
@@ -6,4 +7,6 @@ uploaded_images/
 chroma_db/
 .uv_cache
 __pycache__/
-sample.txt
+.cache/
+archeive/
+chat_sessions/
