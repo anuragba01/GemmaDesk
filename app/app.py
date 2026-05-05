@@ -14,10 +14,12 @@ from engines.gemma import GemmaEngine
 from engines.media import MediaEngine
 from engines.vision import VisionEngine
 from rag.rag import CHROMA_DIR, EMBED_MODEL, IMAGE_DIR, IMAGE_MANIFEST, MODEL_PATH, MultimodalRAG
-from utilities import chat_storage
+from utilities import chat_storage, profile
 
 warnings.filterwarnings("ignore")
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 st.set_page_config(page_title="GemmaDesk", layout="wide")
 
@@ -41,6 +43,19 @@ media_engine = components["media_engine"]
 vision_engine = components["vision_engine"]
 rag = components["rag"]
 
+if not profile.has_profile():
+    @st.dialog("Welcome to GemmaDesk!")
+    def setup_dialog():
+        st.write("Please set up your profile to personalize your experience.")
+        lang = st.selectbox("Preferred Language", ["English", "Spanish", "French", "German", "Hindi"])
+        bg = st.text_input("Educational Background (e.g. High School, College, Professional)")
+        if st.button("Save Profile"):
+            profile.save_profile({"language": lang, "background": bg})
+            st.rerun()
+    setup_dialog()
+
+user_profile = profile.load_profile()
+
 if "session_id" not in st.session_state:
     st.session_state.session_id = chat_storage.generate_session_id()
 
@@ -50,6 +65,19 @@ if "messages" not in st.session_state:
 with st.sidebar:
     st.title("GemmaDesk")
     st.caption("Offline Multimodal Study Tool")
+    st.divider()
+
+    st.header("Personalization")
+    if user_profile:
+        langs = ["English", "Spanish", "French", "German", "Hindi"]
+        current_lang = user_profile.get("language", "English")
+        if current_lang not in langs:
+            langs.append(current_lang)
+        new_lang = st.selectbox("Language", langs, index=langs.index(current_lang))
+        if new_lang != current_lang:
+            user_profile["language"] = new_lang
+            profile.save_profile(user_profile)
+            st.rerun()
     st.divider()
 
     stats = rag.get_stats()
@@ -135,26 +163,41 @@ with st.sidebar:
 
     st.divider()
 
-    st.header("Query Mode")
-    mode = st.radio(
-        "What are you asking about?",
-        ["Text / PDF / Audio / Video", "Images", "Both"],
-        index=0,
-    )
-    if mode == "Images":
-        query_mode = "image"
-    elif mode == "Both":
-        query_mode = "both"
-    else:
-        query_mode = "text"
-
-    st.divider()
-
     st.header("Chat Actions")
     if st.button("New Conversation", use_container_width=True):
         st.session_state.session_id = chat_storage.generate_session_id()
         st.session_state.messages = []
         st.rerun()
+
+    st.divider()
+
+    st.header("Study Templates")
+    
+    @st.dialog("Template Runner", width="large")
+    def run_template_dialog(prompt_text: str):
+        st.info(f"**Executing:** {prompt_text}")
+        with st.spinner("Thinking..."):
+            try:
+                result = rag.query_stream(
+                    prompt_text,
+                    filter_paths=selected_paths,
+                    history=[],  # Templates run isolated from chat history
+                    user_profile=user_profile
+                )
+                st.write_stream(result["stream"])
+                if result.get("sources"):
+                    st.caption("Sources: " + ", ".join(result["sources"]))
+            except Exception as e:
+                st.error(f"Error: {e}")
+        if st.button("Close"):
+            st.rerun()
+
+    if st.button("📝 Summarize Material", use_container_width=True):
+        run_template_dialog("Provide a comprehensive summary of the provided materials. Highlight the top 3 most important takeaways.")
+    if st.button("💡 Explain with Analogy", use_container_width=True):
+        run_template_dialog("Explain the core concepts of this material using a relatable, real-world analogy.")
+    if st.button("🛠️ Practical Use Cases", use_container_width=True):
+        run_template_dialog("Provide 3 specific, real-world practical use cases for the concepts discussed.")
 
     st.divider()
 
@@ -199,34 +242,23 @@ if question := st.chat_input("Ask a question about your documents..."):
             try:
                 if len(selected_image_paths) > 10:
                     raise ValueError("Select up to 10 images at once.")
-                if query_mode == "image":
-                    if not selected_image_paths:
-                        raise ValueError("Select at least one image first.")
-                    result = rag.query_image(
-                        question, 
-                        filter_paths=selected_image_paths,
-                        history=st.session_state.messages[:-1]
-                    )
-                elif query_mode == "both":
-                    result = rag.query_multimodal(
-                        question,
-                        filter_paths=selected_paths,
-                        history=st.session_state.messages[:-1]
-                    )
-                else:
-                    result = rag.query_text(
-                        question, 
-                        filter_paths=selected_paths,
-                        history=st.session_state.messages[:-1]
-                    )
+                
+                result = rag.query_stream(
+                    question,
+                    filter_paths=selected_paths,
+                    history=st.session_state.messages[:-1],
+                    user_profile=user_profile
+                )
 
-                st.markdown(result["answer"])
+                # Use Streamlit's native streaming for a typewriter effect
+                full_response = st.write_stream(result["stream"])
+                
                 if result.get("sources"):
                     st.caption("Sources: " + ", ".join(result["sources"]))
 
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": result["answer"],
+                    "content": full_response,
                     "sources": result.get("sources", []),
                 })
                 
