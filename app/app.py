@@ -6,11 +6,16 @@ import logging
 from pathlib import Path
 import streamlit as st
 
+# Suppress transformer verbosity before imports
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # Add src to path for imports
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from engines.document import DocumentEngine
-from engines.gemma import GemmaEngine
+from engines.vectorstore import VectorStoreEngine
+from rag.gemma import GemmaEngine
 from engines.media import MediaEngine
 from engines.vision import VisionEngine
 from rag.rag import CHROMA_DIR, EMBED_MODEL, IMAGE_DIR, IMAGE_MANIFEST, MODEL_PATH, MultimodalRAG
@@ -25,11 +30,12 @@ st.set_page_config(page_title="GemmaDesk", layout="wide")
 
 @st.cache_resource(show_spinner="Loading RAG engine...")
 def load_components():
-    doc_engine = DocumentEngine(CHROMA_DIR, EMBED_MODEL)
+    gemma_engine = GemmaEngine(MODEL_PATH)
+    vector_store = VectorStoreEngine(CHROMA_DIR, EMBED_MODEL)
+    doc_engine = DocumentEngine(vector_store, gemma_engine=gemma_engine)
     media_engine = MediaEngine("base", doc_engine)
     vision_engine = VisionEngine(IMAGE_DIR, IMAGE_MANIFEST)
-    gemma_engine = GemmaEngine(MODEL_PATH)
-    rag = MultimodalRAG(doc_engine, vision_engine, gemma_engine)
+    rag = MultimodalRAG(doc_engine, vector_store, vision_engine, media_engine, gemma_engine)
     return {
         "doc_engine": doc_engine,
         "media_engine": media_engine,
@@ -47,10 +53,15 @@ if not profile.has_profile():
     @st.dialog("Welcome to GemmaDesk!")
     def setup_dialog():
         st.write("Please set up your profile to personalize your experience.")
-        lang = st.selectbox("Preferred Language", ["English", "Spanish", "French", "German", "Hindi"])
-        bg = st.text_input("Educational Background (e.g. High School, College, Professional)")
+        lang = st.text_input("Preferred Language", value="English")
+        edu = st.selectbox("Education Level", ["High School", "Undergraduate", "Graduate", "Professional", "Other"])
+        bg = st.text_input("Background (e.g., Business, Technology, Arts)")
+        continent = st.selectbox("Continent (Optional)", ["None", "North America", "South America", "Europe", "Asia", "Africa", "Australia", "Antarctica"])
         if st.button("Save Profile"):
-            profile.save_profile({"language": lang, "background": bg})
+            profile_data = {"language": lang, "education": edu, "background": bg}
+            if continent != "None":
+                profile_data["continent"] = continent
+            profile.save_profile(profile_data)
             st.rerun()
     setup_dialog()
 
@@ -69,12 +80,8 @@ with st.sidebar:
 
     st.header("Personalization")
     if user_profile:
-        langs = ["English", "Spanish", "French", "German", "Hindi"]
-        current_lang = user_profile.get("language", "English")
-        if current_lang not in langs:
-            langs.append(current_lang)
-        new_lang = st.selectbox("Language", langs, index=langs.index(current_lang))
-        if new_lang != current_lang:
+        new_lang = st.text_input("Language", value=user_profile.get("language", "English"))
+        if new_lang and new_lang != user_profile.get("language"):
             user_profile["language"] = new_lang
             profile.save_profile(user_profile)
             st.rerun()
@@ -171,49 +178,34 @@ with st.sidebar:
 
     st.divider()
 
-    st.header("Study Templates")
-    
-    @st.dialog("Template Runner", width="large")
-    def run_template_dialog(prompt_text: str):
-        st.info(f"**Executing:** {prompt_text}")
-        with st.spinner("Thinking..."):
-            try:
-                result = rag.query_stream(
-                    prompt_text,
-                    filter_paths=selected_paths,
-                    history=[],  # Templates run isolated from chat history
-                    user_profile=user_profile
-                )
-                st.write_stream(result["stream"])
-                if result.get("sources"):
-                    st.caption("Sources: " + ", ".join(result["sources"]))
-            except Exception as e:
-                st.error(f"Error: {e}")
-        if st.button("Close"):
-            st.rerun()
-
-    if st.button("📝 Summarize Material", use_container_width=True):
-        run_template_dialog("Provide a comprehensive summary of the provided materials. Highlight the top 3 most important takeaways.")
-    if st.button("💡 Explain with Analogy", use_container_width=True):
-        run_template_dialog("Explain the core concepts of this material using a relatable, real-world analogy.")
-    if st.button("🛠️ Practical Use Cases", use_container_width=True):
-        run_template_dialog("Provide 3 specific, real-world practical use cases for the concepts discussed.")
+    with st.expander("📖 Study Templates", expanded=True):
+        from rag import prompts
+        
+        def trigger_template(prompt):
+            st.session_state.template_query = prompt
+            
+        if st.button("📝 Summarize Material", use_container_width=True, on_click=trigger_template, args=(prompts.TEMPLATE_SUMMARIZE,)):
+            pass
+        if st.button("🛠️ Practical Use Cases", use_container_width=True, on_click=trigger_template, args=(prompts.TEMPLATE_PRACTICAL,)):
+            pass
+        if st.button("📚 Prerequisites", use_container_width=True, on_click=trigger_template, args=(prompts.TEMPLATE_PREREQUISITES,)):
+            pass
 
     st.divider()
 
-    st.header("Chat History")
-    sessions = chat_storage.list_sessions()
-    if sessions:
-        for s in sessions[:10]:  # Show last 10 chats
-            title = s["title"]
-            if st.session_state.session_id == s["id"]:
-                title = f"👉 {title}"
-            if st.button(title, key=s["id"], use_container_width=True):
-                st.session_state.session_id = s["id"]
-                st.session_state.messages = chat_storage.load_session(s["id"])
-                st.rerun()
-    else:
-        st.caption("No saved chats.")
+    with st.expander("🕰️ Chat History", expanded=False):
+        sessions = chat_storage.list_sessions()
+        if sessions:
+            for s in sessions[:10]:  # Show last 10 chats
+                title = s["title"]
+                if st.session_state.session_id == s["id"]:
+                    title = f"👉 {title}"
+                if st.button(title, key=s["id"], use_container_width=True):
+                    st.session_state.session_id = s["id"]
+                    st.session_state.messages = chat_storage.load_session(s["id"])
+                    st.rerun()
+        else:
+            st.caption("No saved chats.")
 
     st.divider()
 
@@ -232,7 +224,13 @@ for msg in st.session_state.messages:
         if msg.get("sources"):
             st.caption("Sources: " + ", ".join(msg["sources"]))
 
-if question := st.chat_input("Ask a question about your documents..."):
+question = st.chat_input("Ask a question about your documents...")
+
+if st.session_state.get("template_query"):
+    question = st.session_state.template_query
+    st.session_state.template_query = None
+
+if question:
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)

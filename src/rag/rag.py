@@ -2,8 +2,11 @@ import os
 import logging
 
 from engines.document import DocumentEngine
-from engines.gemma import GemmaEngine
+from engines.vectorstore import VectorStoreEngine
+from rag.gemma import GemmaEngine
 from engines.vision import VisionEngine
+from rag import prompts
+from rag.gateway import IntentGateway
 
 log = logging.getLogger("rag.orchestrator")
 
@@ -15,50 +18,80 @@ MODEL_PATH = "./model/gemma-4-E4B-it.litertlm"
 
 
 class MultimodalRAG:
-    def __init__(self, doc_engine: DocumentEngine, vision_engine: VisionEngine, gemma_engine: GemmaEngine):
+    def __init__(self, doc_engine: DocumentEngine, vector_store: VectorStoreEngine, vision_engine: VisionEngine, media_engine, gemma_engine: GemmaEngine):
         self.doc_engine = doc_engine
+        self.vector_store = vector_store
         self.vision_engine = vision_engine
+        self.media_engine = media_engine
         self.gemma_engine = gemma_engine
+        self.gateway = IntentGateway(self.vector_store.embeddings)
         self.image_paths = self.vision_engine.get_valid_images()
 
     def _retrieve_text_docs(self, question: str, filter_paths: list = None, k: int = 4) -> list:
-        retriever = self.doc_engine.get_retriever(filter_paths=filter_paths, k=k)
+        retriever = self.vector_store.get_retriever(filter_paths=filter_paths, k=k)
         return retriever.invoke(question)
+
+    def _split_selected_paths(self, filter_paths: list = None) -> tuple[list, list]:
+        valid_images = set(self.vision_engine.get_valid_images())
+        image_paths = []
+        text_paths = []
+        for path in filter_paths or []:
+            if path in valid_images:
+                image_paths.append(path)
+            else:
+                text_paths.append(path)
+        return text_paths, image_paths
 
     def _build_text_context(self, docs: list) -> str:
         parts = []
         for doc in docs:
-            source = os.path.basename(doc.metadata.get("source", "unknown"))
-            kind = doc.metadata.get("type", "text")
-            parts.append(f"[From {kind} file: {source}]\n{doc.page_content}")
+            hardness = doc.metadata.get("hardness", "UNKNOWN")
+            parts.append(prompts.CONTEXT_BLOCK_TEMPLATE.format(
+                source=os.path.basename(doc.metadata.get("source", "unknown")),
+                kind=doc.metadata.get("type", "text"),
+                content=f"[Complexity: {hardness}]\n{doc.page_content}"
+            ))
         return "\n\n".join(parts)
 
-    def _build_prompt(self, question: str, docs: list, image_paths: list) -> tuple[str, str]:
+    def _build_prompt(self, question: str, docs: list, image_paths: list, user_profile: dict = None) -> tuple[str, str]:
         context = self._build_text_context(docs)
-        if docs or image_paths:
-            system_text = (
-                "You are a friendly study assistant. Use the retrieved context and attached files when they are relevant. "
-                "If the retrieved material is not enough, answer naturally and say what is missing."
-            )
-        else:
-            system_text = "You are a friendly study assistant. No indexed material matched, so answer naturally."
+        system_text = prompts.CORE_SYSTEM_PROMPT
+        
+        if user_profile:
+            profile_str = "\n### USER PROFILE:\n"
+            if "language" in user_profile:
+                profile_str += f"- Preferred Language: {user_profile['language']}. ALWAYS reply in this language.\n"
+            if "education" in user_profile or "background" in user_profile:
+                edu = user_profile.get("education", "")
+                bg = user_profile.get("background", "")
+                profile_str += f"- Background: {edu} in {bg}. Tailor your explanations to this level and context.\n"
+            if "continent" in user_profile and user_profile["continent"] != "None":
+                profile_str += f"- Location/Context: {user_profile['continent']}. Use culturally relevant examples when appropriate.\n"
+            system_text = profile_str + "\n" + system_text
 
-        prompt_parts = []
-        if context:
-            prompt_parts.append(f"Retrieved text context:\n{context}")
+        # Gateway Check
+        if self.gateway.is_confused(question):
+            system_text += f"\n\n{prompts.GATEWAY_CONFUSION_MODIFIER}"
+
+        image_text = ""
         if image_paths:
-            filenames = ", ".join(os.path.basename(path) for path in image_paths)
-            prompt_parts.append(f"Retrieved image files: {filenames}")
-        prompt_parts.append(f"Question: {question}")
-        return system_text, "\n\n".join(prompt_parts)
+            filenames = ", ".join(os.path.basename(p) for p in image_paths)
+            image_text = prompts.IMAGE_LIST_TEMPLATE.format(filenames=filenames)
+
+        prompt_text = prompts.QUERY_PROMPT_TEMPLATE.format(
+            context_text=context if context else "No relevant text chunks found.",
+            image_text=image_text,
+            question=question
+        )
+        return system_text, prompt_text
 
     def _source_names(self, docs: list, image_paths: list) -> list:
         sources = {os.path.basename(doc.metadata.get("source", "unknown")) for doc in docs}
         sources.update(os.path.basename(path) for path in image_paths)
         return sorted(sources)
 
-    def _answer(self, question: str, history: list, docs: list, image_paths: list) -> dict:
-        system_text, prompt_text = self._build_prompt(question, docs, image_paths)
+    def _answer(self, question: str, history: list, docs: list, image_paths: list, user_profile: dict = None) -> dict:
+        system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile)
         answer = self.gemma_engine.answer({
             "system_text": system_text,
             "prompt_text": prompt_text,
@@ -70,50 +103,80 @@ class MultimodalRAG:
             "sources": self._source_names(docs, image_paths),
         }
 
-    def query_text(self, question: str, filter_paths: list = None, history: list = None) -> dict:
-        log.info("query_text: '%s'", question[:80])
-        try:
-            docs = self._retrieve_text_docs(question, filter_paths=filter_paths)
-        except Exception as e:
-            log.warning("Text retrieval failed: %s", e)
-            docs = []
-        return self._answer(question, history, docs, [])
+    def query(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None) -> dict:
+        log.info("query: '%s'", question[:80])
+        text_paths, image_paths = self._split_selected_paths(filter_paths)
 
-    def query_image(self, question: str, filter_paths: list = None, history: list = None) -> dict:
-        log.info("query_image: '%s'", question[:80])
-        image_paths = self.vision_engine.get_valid_images(filter_paths=filter_paths)
-        if not image_paths:
-            return {
-                "answer": "Select at least one image to ask about.",
-                "sources": [],
-            }
-        return self._answer(question, history, [], image_paths)
+        docs = []
+        text_filter = None if not filter_paths else text_paths
+        if text_filter is None or text_filter:
+            try:
+                docs = self._retrieve_text_docs(question, filter_paths=text_filter)
+            except Exception as e:
+                log.warning("Text retrieval failed: %s", e)
 
-    def query_multimodal(self, question: str, filter_paths: list = None, history: list = None) -> dict:
-        log.info("query_multimodal: '%s'", question[:80])
-        try:
-            docs = self._retrieve_text_docs(question, filter_paths=filter_paths)
-        except Exception as e:
-            log.warning("Text retrieval failed: %s", e)
-            docs = []
-        image_paths = self.vision_engine.get_valid_images(filter_paths=filter_paths)
-        return self._answer(question, history, docs, image_paths)
+        return self._answer(question, history, docs, image_paths, user_profile)
+
+    def query_stream(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, fetch_full: bool = False) -> dict:
+        log.info("query_stream: '%s'", question[:80])
+        text_paths, image_paths = self._split_selected_paths(filter_paths)
+
+        if not fetch_full and self.gateway.is_summary_request(question):
+            log.info("Gateway detected summary intent. Auto-enabling fetch_full mode.")
+            fetch_full = True
+
+        docs = []
+        text_filter = None if not filter_paths else text_paths
+        
+        if text_filter is None or text_filter:
+            try:
+                if fetch_full:
+                    docs = self.vector_store.get_all_chunks(filter_paths=text_filter, limit=30)
+                else:
+                    docs = self._retrieve_text_docs(question, filter_paths=text_filter)
+            except Exception as e:
+                log.warning("Text retrieval failed: %s", e)
+
+        # Video auto-clipping feature
+        for doc in docs:
+            if doc.metadata.get("type") == "video" and "timestamp" in doc.metadata:
+                ts = float(doc.metadata["timestamp"])
+                video_path = doc.metadata.get("source")
+                if video_path and os.path.exists(video_path):
+                    clips = self.media_engine.extract_clip(video_path, ts - 10, ts + 20)
+                    if clips:
+                        image_paths.extend(clips)
+                        log.info(f"Appended extracted video clips to visual context: {clips}")
+                    break # Only extract one clip per query to save compute
+
+        system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile)
+        stream = self.gemma_engine.answer_stream({
+            "system_text": system_text,
+            "prompt_text": prompt_text,
+            "history": history or [],
+            "image_paths": image_paths,
+        })
+        
+        return {
+            "stream": stream,
+            "sources": self._source_names(docs, image_paths),
+        }
 
     def get_stats(self) -> dict:
         self.image_paths = self.vision_engine.get_valid_images()
         return {
-            "text_chunks": self.doc_engine.get_stats(),
+            "text_chunks": self.vector_store.get_stats(),
             "images": self.vision_engine.get_stats(),
         }
 
     def get_source_map(self) -> dict:
-        mapping = self.doc_engine.get_source_map()
+        mapping = self.vector_store.get_source_map()
         mapping.update(self.vision_engine.get_source_map())
         self.image_paths = self.vision_engine.get_valid_images()
         return mapping
 
     def clear_all(self):
         log.info("Clearing all indexed data...")
-        self.doc_engine.clear()
+        self.vector_store.clear()
         self.vision_engine.clear()
         self.image_paths = []
