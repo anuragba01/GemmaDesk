@@ -132,30 +132,38 @@ class MultimodalRAG:
             "sources": self._source_names(docs, image_paths),
         }
 
-    def query(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None) -> dict:
+    def query(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, session_id: str = None) -> dict:
         log.info("query: '%s'", question[:80])
         text_paths, image_paths = self._split_selected_paths(filter_paths)
 
         docs = []
-        text_filter = None if not filter_paths else text_paths
-        if text_filter is None or text_filter:
+        if text_paths:
             try:
-                docs = self._retrieve_text_docs(question, filter_paths=text_filter)
+                docs = self._retrieve_text_docs(question, filter_paths=text_paths)
             except Exception as e:
                 log.warning("Text retrieval failed: %s", e)
 
+        # --- Long-term chat memory via RAG (Addition 2a) ---
+        if session_id:
+            chat_docs = self.vector_store.search_chat_history(question, session_id, k=4)
+            if chat_docs:
+                log.info("Prepending %d chat history block(s) from RAG.", len(chat_docs))
+                docs = chat_docs + docs
+
         return self._answer(question, history, docs, image_paths, user_profile)
 
-    def query_stream(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, fetch_full: bool = False) -> dict:
+    def query_stream(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, fetch_full: bool = False, session_id: str = None) -> dict:
         """
         The main entry point for the Streamlit UI to ask questions.
         
         Process:
         1. Checks IntentGateway for "summary" requests to bypass semantic search.
         2. Retrieves text chunks from ChromaDB.
-        3. Dynamically extracts video clips via ffmpeg if a video chunk is found.
-        4. Builds the final multimodal prompt.
-        5. Streams the answer from the Gemma model.
+        3. (Addition 2a) Retrieves relevant past chat blocks from ChromaDB using semantic
+           search, prefiltered by type=chat and current session_id.
+        4. Dynamically extracts video clips via ffmpeg if a video chunk is found.
+        5. Builds the final multimodal prompt.
+        6. Streams the answer from the Gemma model.
         
         Returns:
             dict: Contains the generator 'stream' and the 'sources' list.
@@ -168,16 +176,24 @@ class MultimodalRAG:
             fetch_full = True
 
         docs = []
-        text_filter = None if not filter_paths else text_paths
-        
-        if text_filter is None or text_filter:
+        if text_paths:
             try:
                 if fetch_full:
-                    docs = self.vector_store.get_all_chunks(filter_paths=text_filter, limit=30)
+                    docs = self.vector_store.get_all_chunks(filter_paths=text_paths, limit=30)
                 else:
-                    docs = self._retrieve_text_docs(question, filter_paths=text_filter)
+                    docs = self._retrieve_text_docs(question, filter_paths=text_paths)
             except Exception as e:
                 log.warning("Text retrieval failed: %s", e)
+
+        # --- Long-term chat memory via RAG (Addition 2a) ---
+        # Prefilter: type == "chat" AND session_id == current session
+        # Then semantic search k=4 to find the most relevant past conversation blocks.
+        if session_id:
+            chat_docs = self.vector_store.search_chat_history(question, session_id, k=4)
+            if chat_docs:
+                log.info("Prepending %d chat history block(s) from RAG.", len(chat_docs))
+                # Prepend so they appear before document chunks in the context
+                docs = chat_docs + docs
 
         # Video auto-clipping feature
         for doc in docs:

@@ -27,6 +27,8 @@ from engines.media import MediaEngine
 from engines.vision import VisionEngine
 from rag.rag import CHROMA_DIR, EMBED_MODEL, IMAGE_DIR, IMAGE_MANIFEST, MODEL_PATH, MultimodalRAG
 from utilities import chat_storage, profile
+from utilities.chat_ingestion import ChatHistoryIngestion
+import threading
 
 # Global configurations and logging setup
 warnings.filterwarnings("ignore")
@@ -88,6 +90,18 @@ if "session_id" not in st.session_state:
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "edit_mode" not in st.session_state:
+    st.session_state.edit_mode = False
+
+if "edit_text" not in st.session_state:
+    st.session_state.edit_text = ""
+
+if "edit_idx" not in st.session_state:
+    st.session_state.edit_idx = -1
+
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None
 
 # --- Sidebar UI ---
 with st.sidebar:
@@ -247,19 +261,64 @@ with st.sidebar:
 st.header("Chat")
 
 # Display conversation history
-for msg in st.session_state.messages:
+for i, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-        if msg.get("sources"):
-            st.caption("Sources: " + ", ".join(msg["sources"]))
+        # Determine if this is the last user message
+        is_last_user = False
+        if msg["role"] == "user":
+            is_last_user = True
+            for subsequent_msg in st.session_state.messages[i+1:]:
+                if subsequent_msg["role"] == "user":
+                    is_last_user = False
+                    break
+                    
+        # If we are in edit mode and this is the message being edited
+        if st.session_state.edit_mode and is_last_user and st.session_state.edit_idx == i:
+            with st.container(border=True):
+                edited_text = st.text_area("Edit your query:", value=st.session_state.edit_text, label_visibility="collapsed", key=f"edit_area_{i}")
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
+                with col1:
+                    if st.button("Cancel", key=f"cancel_{i}", use_container_width=True):
+                        st.session_state.edit_mode = False
+                        st.session_state.edit_text = ""
+                        st.session_state.edit_idx = -1
+                        st.rerun()
+                with col2:
+                    if st.button("Update", key=f"update_{i}", type="primary", use_container_width=True):
+                        st.session_state.pending_question = edited_text
+                        st.session_state.edit_mode = False
+                        st.session_state.edit_text = ""
+                        st.session_state.edit_idx = -1
+                        
+                        # Pop old messages from this index onwards
+                        st.session_state.messages = st.session_state.messages[:i]
+                        chat_storage.save_session(st.session_state.session_id, st.session_state.messages)
+                        st.rerun()
+        else:
+            # Render normally
+            st.markdown(msg["content"])
+            if msg.get("sources"):
+                st.caption("Sources: " + ", ".join(msg["sources"]))
+                
+            # Show a subtle edit icon button for the last user message
+            if is_last_user and not st.session_state.edit_mode:
+                if st.button("✏️", key=f"edit_inline_{i}", help="Edit this query"):
+                    st.session_state.edit_text = msg["content"]
+                    st.session_state.edit_mode = True
+                    st.session_state.edit_idx = i
+                    st.rerun()
 
-# Handle user input
-question = st.chat_input("Ask a question about your documents...")
+# Handle user input (disabled while editing)
+question = st.chat_input("Ask a question about your documents...", disabled=st.session_state.edit_mode)
 
 # Handle template triggers
 if st.session_state.get("template_query"):
     question = st.session_state.template_query
     st.session_state.template_query = None
+
+if st.session_state.get("pending_question"):
+    question = st.session_state.pending_question
+    st.session_state.pending_question = None
 
 if question:
     # Add user message to history and UI
@@ -278,8 +337,11 @@ if question:
                 result = rag.query_stream(
                     question,
                     filter_paths=selected_paths,
-                    history=st.session_state.messages[:-1],
-                    user_profile=user_profile
+                    # Addition 2: Only pass the last 8 messages as direct history (short-term memory)
+                    history=st.session_state.messages[-9:-1],
+                    user_profile=user_profile,
+                    # Addition 2a: Pass session_id so RAG can retrieve older chat blocks
+                    session_id=st.session_state.session_id,
                 )
 
                 # Use Streamlit's native streaming for a typewriter effect
@@ -296,6 +358,24 @@ if question:
                 })
                 
                 chat_storage.save_session(st.session_state.session_id, st.session_state.messages)
+
+                # Addition 1: Every 8 messages, vectorize the latest block in the background
+                msg_count = len(st.session_state.messages)
+                if msg_count % 8 == 0:
+                    session_file = chat_storage.SESSION_DIR + f"/{st.session_state.session_id}.jsonl"
+                    ingestion = ChatHistoryIngestion(
+                        chat_path=session_file,
+                        database_dir=CHROMA_DIR,
+                        embed_model=EMBED_MODEL,
+                        session_id=st.session_state.session_id,
+                    )
+                    t = threading.Thread(target=ingestion.ingest_latest_block, daemon=True)
+                    t.start()
+                    log.info(
+                        "Chat ingestion thread launched for block %d (session %s)",
+                        msg_count // 8,
+                        st.session_state.session_id,
+                    )
 
             except Exception as e:
                 err = f"Error: {e}"

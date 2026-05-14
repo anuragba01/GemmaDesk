@@ -112,7 +112,7 @@ class VectorStoreEngine:
     def get_all_chunks(self, filter_paths: list = None, limit: int = 30) -> list:
         """Directly fetches up to `limit` chunks from ChromaDB for any source type
         (PDF, audio transcript, video transcript). Bypasses semantic search entirely."""
-        from langchain.schema import Document
+        from langchain_core.documents import Document
         try:
             if filter_paths:
                 where = {"source": filter_paths[0]} if len(filter_paths) == 1 else {"source": {"$in": filter_paths}}
@@ -131,6 +131,42 @@ class VectorStoreEngine:
             return docs
         except Exception as e:
             log.error("get_all_chunks failed: %s", e)
+            return []
+
+    def search_chat_history(self, query: str, session_id: str, k: int = 4) -> list:
+        """
+        Semantic search restricted to chat history blocks for a specific session.
+
+        Prefilter: metadata["type"] == "chat" AND metadata["session_id"] == session_id
+        This implements the RAG long-term chat memory (Addition 2a).
+
+        Args:
+            query:      The user's current question / message.
+            session_id: UUID of the current chat session to scope the search.
+            k:          Number of chat blocks to retrieve (default 4).
+
+        Returns:
+            A list of LangChain Document objects representing past chat blocks.
+        """
+        from langchain_core.documents import Document
+        try:
+            where_filter = {
+                "$and": [
+                    {"type": {"$eq": "chat"}},
+                    {"session_id": {"$eq": session_id}},
+                ]
+            }
+            results = self.vectorstore.similarity_search(
+                prompts.EMBED_QUERY_PREFIX + query,
+                k=k,
+                filter=where_filter,
+            )
+            log.info(
+                "Chat RAG: retrieved %d block(s) for session %s", len(results), session_id
+            )
+            return results
+        except Exception as e:
+            log.warning("search_chat_history failed: %s", e)
             return []
 
     def get_stats(self) -> int:
