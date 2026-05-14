@@ -1,3 +1,10 @@
+"""
+rag.py - The Orchestrator for GemmaDesk
+
+This module contains the MultimodalRAG class, which acts as the central brain
+for the application. It coordinates the interactions between the Vector DB (Chroma),
+the Multimodal LLM (Gemma), and the various data engines (Document, Media, Vision).
+"""
 import os
 import logging
 
@@ -18,7 +25,21 @@ MODEL_PATH = "./model/gemma-4-E4B-it.litertlm"
 
 
 class MultimodalRAG:
+    """
+    The central coordinator for the RAG pipeline.
+    Handles intent detection, database retrieval, prompt assembly, and inference routing.
+    """
     def __init__(self, doc_engine: DocumentEngine, vector_store: VectorStoreEngine, vision_engine: VisionEngine, media_engine, gemma_engine: GemmaEngine):
+        """
+        Initializes the Orchestrator with all necessary engines and the IntentGateway.
+        
+        Args:
+            doc_engine: Handles text/PDF chunking and parsing.
+            vector_store: Handles ChromaDB interactions (semantic search).
+            vision_engine: Handles image tracking (manifest).
+            media_engine: Handles audio/video transcription and clipping.
+            gemma_engine: Handles LiteRT LLM inference.
+        """
         self.doc_engine = doc_engine
         self.vector_store = vector_store
         self.vision_engine = vision_engine
@@ -32,6 +53,10 @@ class MultimodalRAG:
         return retriever.invoke(question)
 
     def _split_selected_paths(self, filter_paths: list = None) -> tuple[list, list]:
+        """
+        Splits UI-selected file paths into text-searchable paths (PDF/audio) 
+        and raw visual paths (JPG/PNG).
+        """
         valid_images = set(self.vision_engine.get_valid_images())
         image_paths = []
         text_paths = []
@@ -54,6 +79,10 @@ class MultimodalRAG:
         return "\n\n".join(parts)
 
     def _build_prompt(self, question: str, docs: list, image_paths: list, user_profile: dict = None) -> tuple[str, str]:
+        """
+        Assembles the master prompt sent to the LLM.
+        Order of assembly: User Profile -> System Rules -> Intent Modifiers -> Images -> Context -> Question.
+        """
         context = self._build_text_context(docs)
         system_text = prompts.CORE_SYSTEM_PROMPT
         
@@ -118,6 +147,19 @@ class MultimodalRAG:
         return self._answer(question, history, docs, image_paths, user_profile)
 
     def query_stream(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, fetch_full: bool = False) -> dict:
+        """
+        The main entry point for the Streamlit UI to ask questions.
+        
+        Process:
+        1. Checks IntentGateway for "summary" requests to bypass semantic search.
+        2. Retrieves text chunks from ChromaDB.
+        3. Dynamically extracts video clips via ffmpeg if a video chunk is found.
+        4. Builds the final multimodal prompt.
+        5. Streams the answer from the Gemma model.
+        
+        Returns:
+            dict: Contains the generator 'stream' and the 'sources' list.
+        """
         log.info("query_stream: '%s'", question[:80])
         text_paths, image_paths = self._split_selected_paths(filter_paths)
 

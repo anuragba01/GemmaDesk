@@ -1,121 +1,122 @@
-# GemmaDesk Low-Level Design (LLD)
+AI System Design Checklist
 
-This document provides a detailed technical breakdown of the GemmaDesk multimodal RAG architecture.
+1. Requirements
+[ ] Functional requirements (user facing)
+[ ] Functional requirements (system/internal)
+[ ] Non-functional requirements (latency, availability, scale)
+[ ] AI-specific requirements (accuracy, hallucination tolerance, offline/online)
+[ ] Constraints (hardware, model size, cost, privacy)
+[ ] Single user or multi-user defined
+[ ] Real-time or batch processing defined
 
----
+2. Data Pipeline
+[ ] Data sources identified (files, APIs, DBs, streams)
+[ ] Ingestion strategy per data type defined
+[ ] Preprocessing steps defined (cleaning, normalization)
+[ ] Chunking strategy defined (size, overlap, method)
+[ ] Metadata schema defined per chunk
+[ ] File type detection and routing logic
+[ ] Error handling for corrupt/unsupported files
+[ ] Pipeline is idempotent (re-running doesn't duplicate data)
 
-## 1. Ingestion Pipeline LLD
-Responsible for transforming raw files into searchable vector chunks.
+3. Embedding Design
+[ ] Embedding model chosen and justified
+[ ] Embedding dimensions defined
+[ ] Distance metric chosen (cosine, L2, dot product)
+[ ] Separate embedding strategy for different modalities (text, image, audio)
+[ ] Embedding model versioned
+[ ] Re-embedding strategy if model changes
 
-### Chunking Strategy
-- **Text/PDF:** Uses `RecursiveCharacterTextSplitter`. 
-  - `chunk_size`: 500 characters.
-  - `chunk_overlap`: 50 characters.
-  - *Rationale:* Small chunks are better for local 4B-parameter models to prevent context dilution.
-- **Audio/Video:** Uses `openai-whisper`.
-  - Transcribes into time-stamped segments.
-  - Each segment is treated as a chunk with `[MM:SS]` prefix added to the text.
+4. Vector Storage
+[ ] Vector DB chosen and justified
+[ ] Collection structure defined
+[ ] Metadata fields defined per vector
+[ ] Indexing strategy defined (HNSW, flat, IVF)
+[ ] Session/user isolation strategy
+[ ] Persistence and backup strategy
+[ ] Separate collections for different modalities
 
-### Metadata Schema
-Every chunk in ChromaDB contains:
-- `source`: Absolute path to the original file (used for filtering).
-- `type`: `pdf`, `text`, `audio`, or `video`.
-- `timestamp`: (Optional) Float value for media files to allow "jump-to-time" features.
+5. Retrieval Design
+[ ] top-k value decided
+[ ] Similarity threshold defined
+[ ] Metadata filtering strategy (by session, file, type)
+[ ] Hybrid search considered (semantic + keyword)
+[ ] Query rewriting/expansion considered
+[ ] Retrieval quality measurable (precision, recall)
 
-### File Type Detection
-- Handled in `app/app.py` via file extension mapping (`.suffix.lower()`).
-- Routes to `ingest_pdf`, `ingest_text`, `ingest_audio`, or `ingest_video` in the `rag.py` orchestrator.
+6. Prompt Design
+[ ] Prompt template defined
+[ ] Component order defined (system → history → context → query)
+[ ] System prompt finalized
+[ ] Prompt versioned
+[ ] Prompt tested against edge cases (empty context, long query)
+[ ] Output format instructed if needed (JSON, markdown, plain)
 
----
+7. Context Window Management
+[ ] Max token limit defined
+[ ] Token counting method defined
+[ ] Trimming priority order defined
+[ ] What is always preserved (system prompt, current query)
+[ ] What gets dropped first (oldest history)
+[ ] Tested at limit boundary
 
-## 2. Embedding LLD
-The bridge between raw text and mathematical vectors.
+8. Model / Inference
+[ ] Model chosen and justified
+[ ] Quantization strategy defined
+[ ] Runtime chosen (LiteRT, llama.cpp, vLLM, Ollama)
+[ ] Hardware target defined (CPU/GPU/NPU, RAM limit)
+[ ] Model loading strategy (cold start, caching)
+[ ] Streaming response supported
+[ ] Model swap/upgrade strategy defined
+[ ] Fallback if model fails
 
-### Text Embeddings
-- **Model:** `nomic-ai/nomic-embed-text-v1.5`.
-- **Implementation:** `sentence-transformers` via `langchain-huggingface`.
-- **Flow:** `Text Chunk` → `Mean Pooling` → `L2 Normalization` → `768-D Vector`.
-- **Distance Metric:** **Cosine Similarity** (handled by ChromaDB).
+9. Memory & Session Management
+[ ] Session storage design defined (SQLite, JSON, Redis)
+[ ] Schema defined (sessions, messages tables)
+[ ] Session isolation per user defined
+[ ] Chat history retrieval strategy
+[ ] Session cleanup/expiry strategy
 
-### Vision Embeddings (Planned)
-- **Model:** `CLIP (ViT-B/32)`.
-- **Implementation:** Images are processed through the CLIP Image Encoder.
-- **Storage:** Stored in a separate ChromaDB collection (`image_docs`) or as metadata-linked vectors.
-- **Dimensions:** 512-D.
+10. Evaluation & Quality
+[ ] Eval dataset defined
+[ ] Retrieval quality metrics defined (precision@k, recall@k)
+[ ] Response quality metrics defined (relevance, faithfulness)
+[ ] Hallucination detection strategy
+[ ] Baseline established
+[ ] Regression testing on prompt changes
 
----
+11. Scalability
+[ ] Concurrent user handling strategy
+[ ] Embedding pipeline scalable (batch processing)
+[ ] Vector DB scalable (sharding, partitioning)
+[ ] Model inference scalable (batching, replicas)
+[ ] Queue for async ingestion if needed
 
-## 3. RAG / Retrieval LLD
-How the system finds relevant information.
+12. Reliability
+[ ] Retry logic for model inference
+[ ] Fallback response if retrieval returns nothing
+[ ] Fallback if embedding fails
+[ ] Graceful degradation (answer without context if retrieval fails)
+[ ] Data backup strategy
 
-### Query Flow
-1. User question is embedded using the same `nomic-embed-text` model.
-2. **Search Params:**
-   - `top_k`: 4 chunks (balanced for speed vs. context).
-   - `filter`: Metadata-based filter using the `source` field if the user selected specific files in the UI.
-3. **Session Scoping:** Retrieval is performed against the entire database unless file-level filters are active.
+13. Security & Privacy
+[ ] User data isolation
+[ ] Uploaded files stored securely
+[ ] Model doesn't leak data across sessions
+[ ] PII handling defined
+[ ] Access control if multi-user
 
----
+14. Monitoring & Observability
+[ ] Inference latency tracked
+[ ] Retrieval latency tracked
+[ ] Token usage tracked
+[ ] Retrieval score logged per query
+[ ] Hallucination/bad response flagging mechanism
+[ ] Alerts on model failure or high latency
 
-## 4. Prompt Construction LLD
-How we "talk" to Gemma 4.
+15. Trade-offs Documented
+[ ] Every major decision has a rationale
+[ ] Alternatives considered and rejected with reason
+[ ] Known bottlenecks identified
+[ ] Known limitations documented (e.g. CLIP vs nomic dimension mismatch)
 
-### Template Structure
-The prompt is assembled as a list of messages:
-1. **System Prompt:** Sets the persona ("Friendly Study Assistant") and injects the retrieved **Context**.
-2. **Conversation History:** Previous `N` messages from the current session.
-3. **User Query:** The current question.
-
-### Example Construction
-```python
-messages = [
-  {"role": "system", "content": "Context: [Chunks from ChromaDB]\nAnswer based on this..."},
-  {"role": "user", "content": "Previous Q"},
-  {"role": "assistant", "content": "Previous A"},
-  {"role": "user", "content": "Current Question"}
-]
-```
-
----
-
-## 5. Context Window Management LLD
-Gemma 4 has a finite memory (context window).
-
-- **Max Token Limit:** 8192 tokens (approx).
-- **Trimming Strategy:** 
-  - If total tokens exceed limit, the **oldest chat history** messages are dropped first.
-  - **System Prompt & Retrieved Context** are always preserved as priority.
-  - **Logic:** `Current Query` > `Retrieved Context` > `System Prompt` > `Recent History`.
-
----
-
-## 6. Session & Storage LLD
-Currently transitioning from JSON files to a structured format.
-
-### Storage Logic
-- **Current:** Single JSON file per session in `./chat_sessions`.
-- **Proposed SQLite Schema:**
-  - `sessions` Table: `id` (UUID), `title`, `created_at`, `updated_at`.
-  - `messages` Table: `id`, `session_id`, `role`, `content`, `sources`, `timestamp`.
-
----
-
-## 7. LiteRT-LM Wrapper LLD
-The interface between the Python code and the AI model.
-
-### Direct Wrapper Design (Internal)
-Instead of a network server, a `BaseLLM` style class would:
-1. **Init:** Load `.litertlm` model into memory (using `st.cache_resource`).
-2. **Invoke:** Take `List[Message]`, convert to LiteRT's `Conversation` object.
-3. **Stream:** Use a generator to yield `token_text` as the model produces it.
-
----
-
-## 8. Streamlit UI LLD
-The interaction layer.
-
-- **State Management:** Uses `st.session_state` to track:
-  - `messages`: Current chat bubble data.
-  - `session_id`: Unique ID for the current chat session.
-- **File Handling:** Files are temporarily saved to `/tmp/gemmadesk_uploads/` during processing to ensure clean paths for metadata indexing.
-- **Rendering:** Custom CSS for "Chat Bubbles" to ensure a premium, modern feel.

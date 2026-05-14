@@ -1,3 +1,10 @@
+"""
+vectorstore.py - Vector Database Engine
+
+This module contains the VectorStoreEngine class which manages all interactions 
+with the local ChromaDB instance. It handles embedding generation, document 
+indexing, semantic retrieval, and full-content bypass retrieval.
+"""
 import os
 import logging
 from langchain_community.vectorstores import Chroma
@@ -7,7 +14,17 @@ from rag import prompts
 log = logging.getLogger("rag.vectorstore")
 
 class VectorStoreEngine:
+    """
+    Manages the ChromaDB vector database and HuggingFace local embeddings.
+    """
     def __init__(self, chroma_dir: str, embed_model: str):
+        """
+        Initializes the embedding model and connects to the Chroma database.
+        
+        Args:
+            chroma_dir: The local directory path where ChromaDB saves its SQLite files.
+            embed_model: The HuggingFace model identifier (e.g., 'nomic-ai/nomic-embed-text-v1.5').
+        """
         self.chroma_dir = chroma_dir
         
         log.info("Loading local embeddings (%s)...", embed_model)
@@ -42,6 +59,13 @@ class VectorStoreEngine:
             raise
 
     def add_documents(self, splits: list):
+        """
+        Embeds and indexes a list of text chunks into ChromaDB.
+        
+        Args:
+            splits: A list of LangChain Document objects. Each Document must contain
+                    `page_content` (the text) and `metadata` (source, hardness, etc.).
+        """
         log.info("Indexing %d chunk(s) into ChromaDB...", len(splits))
         try:
             if splits:
@@ -51,6 +75,22 @@ class VectorStoreEngine:
             raise
 
     def get_retriever(self, filter_paths: list = None, k: int = 4):
+        """
+        Creates a custom LangChain retriever for semantic search.
+        
+        Features:
+        1. Applies metadata filtering if `filter_paths` are provided.
+        2. Automatically prepends the required prefix ('search_query: ') to 
+           user queries before calculating the embedding, which is a specific 
+           requirement for Nomic embedding models to function optimally.
+           
+        Args:
+            filter_paths: Optional list of file paths to restrict the search to.
+            k: The number of chunks to retrieve (default is 4).
+            
+        Returns:
+            A custom LangChain retriever object.
+        """
         # We wrap the search to ensure Nomic's required prefix is added to the query
         search_kwargs = {"k": k}
         if filter_paths:
@@ -61,11 +101,11 @@ class VectorStoreEngine:
         
         retriever = self.vectorstore.as_retriever(search_kwargs=search_kwargs)
         
-        # Override the invoke method to add the prefix
+        # Override the invoke method to add the prefix (safely bypassing Pydantic)
         original_invoke = retriever.invoke
         def prefixed_invoke(query: str, **kwargs):
             return original_invoke(prompts.EMBED_QUERY_PREFIX + query, **kwargs)
-        retriever.invoke = prefixed_invoke
+        object.__setattr__(retriever, 'invoke', prefixed_invoke)
         
         return retriever
 
@@ -94,6 +134,7 @@ class VectorStoreEngine:
             return []
 
     def get_stats(self) -> int:
+        """Returns the total number of text chunks currently indexed in ChromaDB."""
         try:
             return self.vectorstore._collection.count()
         except Exception:
@@ -112,6 +153,10 @@ class VectorStoreEngine:
         return mapping
 
     def clear(self):
+        """
+        Deletes the entire ChromaDB collection, effectively wiping all indexed 
+        text and transcript data, then reinitializes a fresh, empty database.
+        """
         try:
             if hasattr(self, 'vectorstore') and self.vectorstore is not None:
                 self.vectorstore.delete_collection()

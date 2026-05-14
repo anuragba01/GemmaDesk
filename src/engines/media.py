@@ -1,3 +1,10 @@
+"""
+media.py - Audio and Video Processing Engine
+
+This module contains the MediaEngine class, which handles the transcription of
+audio and video files using the Whisper model. It also provides utilities to 
+dynamically extract audio and keyframe clips from video files.
+"""
 import os
 import tempfile
 import subprocess
@@ -8,7 +15,17 @@ from rag import prompts
 log = logging.getLogger("rag.media")
 
 class MediaEngine:
+    """
+    Handles transcription of media files and dynamic clip extraction.
+    """
     def __init__(self, whisper_model: str, doc_engine):
+        """
+        Initializes the MediaEngine.
+        
+        Args:
+            whisper_model: The name of the Whisper model to load (e.g., 'base').
+            doc_engine: The DocumentEngine instance used to chunk and index the resulting transcripts.
+        """
         self.whisper_model = whisper_model
         self.doc_engine = doc_engine
         self._whisper = None
@@ -37,6 +54,15 @@ class MediaEngine:
         return docs
 
     def ingest_audio(self, path: str) -> int:
+        """
+        Transcribes an audio file and sends the segments to the DocumentEngine for indexing.
+        
+        Args:
+            path: Absolute path to the audio file.
+            
+        Returns:
+            int: The number of transcript chunks indexed.
+        """
         log.info("Transcribing audio: %s", path)
         model = self._get_whisper()
         result = model.transcribe(path, verbose=False, initial_prompt=prompts.WHISPER_INITIAL_PROMPT)
@@ -45,6 +71,16 @@ class MediaEngine:
         return self.doc_engine.index_docs(docs)
 
     def ingest_video(self, path: str) -> int:
+        """
+        Extracts the audio track from a video using ffmpeg, transcribes it, 
+        and sends the segments to the DocumentEngine for indexing.
+        
+        Args:
+            path: Absolute path to the video file.
+            
+        Returns:
+            int: The number of transcript chunks indexed.
+        """
         log.info("Extracting audio from video: %s", path)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_wav = tmp.name
@@ -66,8 +102,20 @@ class MediaEngine:
             if os.path.exists(tmp_wav):
                 os.unlink(tmp_wav)
 
-    def extract_clip(self, video_path: str, start_time: float, end_time: float) -> str:
-        """Extracts a short video clip (or audio + keyframe if needed) using ffmpeg."""
+    def extract_clip(self, video_path: str, start_time: float, end_time: float) -> list:
+        """
+        Extracts an audio snippet and a single keyframe image from a specific 
+        timestamp range within a video file using ffmpeg.
+        
+        Args:
+            video_path: Absolute path to the source video.
+            start_time: Start time in seconds.
+            end_time: End time in seconds.
+            
+        Returns:
+            list: A list containing two absolute paths (one for the temporary 
+                  audio snippet, one for the keyframe image).
+        """
         log.info(f"Extracting video clip from {video_path} ({start_time}s to {end_time}s)")
         
         # Ensure start_time is not negative
