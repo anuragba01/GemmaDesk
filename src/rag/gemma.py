@@ -92,7 +92,11 @@ class GemmaEngine:
                     content.append({"type": "image", "path": media_path})
 
             stream = conv.send_message_async({"role": "user", "content": content})
-            for chunk in stream:
-                for item in chunk.get("content", []):
-                    if item.get("type") == "text":
-                        yield item["text"]
+            try:
+                for chunk in stream:
+                    for item in chunk.get("content", []):
+                        if item.get("type") == "text":
+                            yield item["text"]
+            except GeneratorExit:
+                log.info("Streamlit aborted stream. Generator explicitly closed. Releasing Litert session lock.")
+                return

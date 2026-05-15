@@ -7,6 +7,7 @@ the Multimodal LLM (Gemma), and the various data engines (Document, Media, Visio
 """
 import os
 import logging
+import re
 
 from engines.document import DocumentEngine
 from engines.vectorstore import VectorStoreEngine
@@ -22,6 +23,27 @@ IMAGE_DIR = "./uploaded_images"
 IMAGE_MANIFEST = "./image_manifest.json"
 EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
 MODEL_PATH = "./model/gemma-4-E4B-it.litertlm"
+
+def extract_seconds(text: str) -> list[int]:
+    """Parses timestamps like '1 min 50 sec', '1:50', '30s' from text."""
+    pattern = r'(?:(\d+)\s*(?:min(?:ute)?s?|m))?\s*(?:and\s*)?(?:(\d+)\s*(?:sec(?:ond)?s?|s))?'
+    matches = re.finditer(pattern, text, re.IGNORECASE)
+    
+    times = []
+    for match in matches:
+        m, s = match.groups()
+        if m or s:
+            total = 0
+            if m: total += int(m) * 60
+            if s: total += int(s)
+            times.append(total)
+            
+    pattern2 = r'(\d{1,2}):(\d{2})'
+    for match in re.finditer(pattern2, text):
+        m, s = match.groups()
+        times.append(int(m) * 60 + int(s))
+        
+    return list(set(times))
 
 
 class MultimodalRAG:
@@ -78,13 +100,18 @@ class MultimodalRAG:
             ))
         return "\n\n".join(parts)
 
-    def _build_prompt(self, question: str, docs: list, image_paths: list, user_profile: dict = None) -> tuple[str, str]:
+    def _build_prompt(self, question: str, docs: list, image_paths: list, user_profile: dict = None, video_durations: dict = None) -> tuple[str, str]:
         """
         Assembles the master prompt sent to the LLM.
         Order of assembly: User Profile -> System Rules -> Intent Modifiers -> Images -> Context -> Question.
         """
         context = self._build_text_context(docs)
         system_text = prompts.CORE_SYSTEM_PROMPT
+        
+        if video_durations:
+            system_text += "\n\n### MEDIA METADATA:\n"
+            for v, d in video_durations.items():
+                system_text += f"- Video '{v}' has a total duration of {int(d)} seconds.\n"
         
         if user_profile:
             profile_str = "\n### USER PROFILE:\n"
@@ -120,7 +147,7 @@ class MultimodalRAG:
         return sorted(sources)
 
     def _answer(self, question: str, history: list, docs: list, image_paths: list, user_profile: dict = None) -> dict:
-        system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile)
+        system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile, video_durations)
         answer = self.gemma_engine.answer({
             "system_text": system_text,
             "prompt_text": prompt_text,
@@ -142,6 +169,32 @@ class MultimodalRAG:
                 docs = self._retrieve_text_docs(question, filter_paths=text_paths)
             except Exception as e:
                 log.warning("Text retrieval failed: %s", e)
+
+        # Regex Intent Extraction & Error Handling
+        explicit_times = extract_seconds(question)
+        explicit_clip_extracted = False
+        target_videos = [p for p in text_paths if p.endswith(('.mp4', '.mov', '.avi'))] if text_paths else []
+        
+        if explicit_times:
+            if not target_videos:
+                return {
+                    "answer": "Please select a specific video from the sidebar to extract timestamps from.",
+                    "sources": []
+                }
+            for video in target_videos:
+                for ts in explicit_times:
+                    clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
+                    if clips:
+                        image_paths.extend(clips)
+                        explicit_clip_extracted = True
+                        log.info(f"Explicitly extracted video clips at {ts}s: {clips}")
+
+        # Fetch video durations
+        video_durations = {}
+        for v in target_videos:
+            dur = self.vector_store.get_video_duration(v)
+            if dur > 0:
+                video_durations[os.path.basename(v)] = dur
 
         # --- Long-term chat memory via RAG (Addition 2a) ---
         if session_id:
@@ -185,6 +238,31 @@ class MultimodalRAG:
             except Exception as e:
                 log.warning("Text retrieval failed: %s", e)
 
+        # Regex Intent Extraction & Error Handling
+        explicit_times = extract_seconds(question)
+        explicit_clip_extracted = False
+        target_videos = [p for p in text_paths if p.endswith(('.mp4', '.mov', '.avi'))] if text_paths else []
+        
+        if explicit_times:
+            if not target_videos:
+                def error_stream():
+                    yield "Please select a specific video from the sidebar to extract timestamps from."
+                return {"stream": error_stream(), "sources": []}
+            for video in target_videos:
+                for ts in explicit_times:
+                    clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
+                    if clips:
+                        image_paths.extend(clips)
+                        explicit_clip_extracted = True
+                        log.info(f"Explicitly extracted video clips at {ts}s: {clips}")
+
+        # Fetch video durations
+        video_durations = {}
+        for v in target_videos:
+            dur = self.vector_store.get_video_duration(v)
+            if dur > 0:
+                video_durations[os.path.basename(v)] = dur
+
         # --- Long-term chat memory via RAG (Addition 2a) ---
         # Prefilter: type == "chat" AND session_id == current session
         # Then semantic search k=4 to find the most relevant past conversation blocks.
@@ -196,18 +274,19 @@ class MultimodalRAG:
                 docs = chat_docs + docs
 
         # Video auto-clipping feature
-        for doc in docs:
-            if doc.metadata.get("type") == "video" and "timestamp" in doc.metadata:
-                ts = float(doc.metadata["timestamp"])
-                video_path = doc.metadata.get("source")
-                if video_path and os.path.exists(video_path):
-                    clips = self.media_engine.extract_clip(video_path, ts - 10, ts + 20)
-                    if clips:
-                        image_paths.extend(clips)
-                        log.info(f"Appended extracted video clips to visual context: {clips}")
-                    break # Only extract one clip per query to save compute
+        if not explicit_clip_extracted:
+            for doc in docs:
+                if doc.metadata.get("type") == "video" and "timestamp" in doc.metadata:
+                    ts = float(doc.metadata["timestamp"])
+                    video_path = doc.metadata.get("source")
+                    if video_path and os.path.exists(video_path):
+                        clips = self.media_engine.extract_clip(video_path, ts - 10, ts + 20)
+                        if clips:
+                            image_paths.extend(clips)
+                            log.info(f"Appended extracted video clips to visual context: {clips}")
+                        break # Only extract one clip per query to save compute
 
-        system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile)
+        system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile, video_durations)
         stream = self.gemma_engine.answer_stream({
             "system_text": system_text,
             "prompt_text": prompt_text,

@@ -103,6 +103,16 @@ if "edit_idx" not in st.session_state:
 if "pending_question" not in st.session_state:
     st.session_state.pending_question = None
 
+if "active_stream" not in st.session_state:
+    st.session_state.active_stream = None
+elif st.session_state.active_stream is not None:
+    log.warning("Forcing cleanup of orphaned active_stream generator.")
+    try:
+        st.session_state.active_stream.close()
+    except Exception as e:
+        log.error("Failed to close active_stream: %s", e)
+    st.session_state.active_stream = None
+
 # --- Sidebar UI ---
 with st.sidebar:
     st.title("GemmaDesk")
@@ -299,14 +309,46 @@ for i, msg in enumerate(st.session_state.messages):
             st.markdown(msg["content"])
             if msg.get("sources"):
                 st.caption("Sources: " + ", ".join(msg["sources"]))
-                
-            # Show a subtle edit icon button for the last user message
-            if is_last_user and not st.session_state.edit_mode:
-                if st.button("✏️", key=f"edit_inline_{i}", help="Edit this query"):
-                    st.session_state.edit_text = msg["content"]
-                    st.session_state.edit_mode = True
-                    st.session_state.edit_idx = i
-                    st.rerun()
+
+# Find the last user message to enable the edit toolbar button
+last_user_idx = -1
+last_user_content = ""
+for idx, msg in enumerate(st.session_state.messages):
+    if msg["role"] == "user":
+        last_user_idx = idx
+        last_user_content = msg["content"]
+
+if last_user_idx != -1 and not st.session_state.edit_mode:
+    # Use a hidden anchor div to target the button precisely via CSS
+    st.markdown('<div class="edit-btn-anchor"></div>', unsafe_allow_html=True)
+    if st.button("✏️ Edit Last Query", key="edit_toolbar_btn", help="Edit your last question"):
+        st.session_state.edit_text = last_user_content
+        st.session_state.edit_mode = True
+        st.session_state.edit_idx = last_user_idx
+        st.rerun()
+
+    # CSS to float the button exactly in the bottom right corner above chat input
+    st.markdown("""
+    <style>
+    div.element-container:has(.edit-btn-anchor) {
+        display: none;
+    }
+    div.element-container:has(.edit-btn-anchor) + div.element-container {
+        position: fixed !important;
+        bottom: 130px !important;
+        right: 30px !important;
+        z-index: 999 !important;
+        width: auto !important;
+    }
+    /* Add a subtle shadow and rounded corners for premium feel */
+    div.element-container:has(.edit-btn-anchor) + div.element-container button {
+        box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
+        border-radius: 20px;
+        border: 1px solid #e0e0e0;
+        background-color: white;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # Handle user input (disabled while editing)
 question = st.chat_input("Ask a question about your documents...", disabled=st.session_state.edit_mode)
@@ -345,7 +387,9 @@ if question:
                 )
 
                 # Use Streamlit's native streaming for a typewriter effect
-                full_response = st.write_stream(result["stream"])
+                st.session_state.active_stream = result["stream"]
+                full_response = st.write_stream(st.session_state.active_stream)
+                st.session_state.active_stream = None
                 
                 if result.get("sources"):
                     st.caption("Sources: " + ", ".join(result["sources"]))
