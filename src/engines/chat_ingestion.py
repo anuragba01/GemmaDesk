@@ -14,7 +14,7 @@ import json
 import logging
 from langchain_core.documents import Document
 from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 
 log = logging.getLogger("rag.chat_ingestion")
 
@@ -38,23 +38,9 @@ class ChatHistoryIngestion:
         self.embed_model = embed_model
         self.session_id = session_id
 
-    def _load_embeddings(self) -> HuggingFaceEmbeddings:
-        """Loads the local HuggingFace embedding model."""
-        try:
-            import torch
-            device = (
-                "cuda" if torch.cuda.is_available()
-                else "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-                else "cpu"
-            )
-        except ImportError:
-            device = "cpu"
-
-        return HuggingFaceEmbeddings(
-            model_name=self.embed_model,
-            model_kwargs={"device": device},
-            encode_kwargs={"normalize_embeddings": True},
-        )
+    def _load_embeddings(self):
+        """Loads the local embedding model used by the main vector store."""
+        return FastEmbedEmbeddings(model_name=self.embed_model)
 
     def _read_messages(self) -> list[dict]:
         """

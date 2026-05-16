@@ -146,7 +146,7 @@ class MultimodalRAG:
         sources.update(os.path.basename(path) for path in image_paths)
         return sorted(sources)
 
-    def _answer(self, question: str, history: list, docs: list, image_paths: list, user_profile: dict = None) -> dict:
+    def _answer(self, question: str, history: list, docs: list, image_paths: list, user_profile: dict = None, video_durations: dict = None) -> dict:
         system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile, video_durations)
         answer = self.gemma_engine.answer({
             "system_text": system_text,
@@ -208,7 +208,7 @@ class MultimodalRAG:
                 log.info("Prepending %d chat history block(s) from RAG.", len(chat_docs))
                 docs = chat_docs + docs
 
-        return self._answer(question, history, docs, image_paths, user_profile)
+        return self._answer(question, history, docs, image_paths, user_profile, video_durations)
 
     def query_stream(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, fetch_full: bool = False, session_id: str = None) -> dict:
         """
