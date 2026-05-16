@@ -21,7 +21,7 @@ log = logging.getLogger("rag.orchestrator")
 CHROMA_DIR = "./chroma_db"
 IMAGE_DIR = "./uploaded_images"
 IMAGE_MANIFEST = "./image_manifest.json"
-EMBED_MODEL = "nomic-ai/nomic-embed-text-v1.5"
+EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 MODEL_PATH = "./model/gemma-4-E4B-it.litertlm"
 
 def extract_seconds(text: str) -> list[int]:

@@ -1,24 +1,24 @@
-# GemmaDesk — Python dependencies
+# GemmaDesk — Ultra-Light Python dependencies
 # Install: uv pip install -r requirements.txt
 
-torch
-torchvision
-timm
-litert-lm
+# Core UI & LLM
 streamlit
-langchain-huggingface
-sentence-transformers
+litert-lm
+
+# RAG & Storage
 langchain-community
 langchain-text-splitters
 langchain-core
 chromadb
 pypdf
-openai-whisper
-protobuf<=3.20.3
-uvicorn
-pytest
-pytest-mock
+
+# Fast & Light Inference Engines (Replaces PyTorch)
+fastembed
+faster-whisper
 imageio-ffmpeg
+protobuf<=3.20.3
+
+# Desktop App Mode (Optional but required for launcher.py)
 pywebview
 PyQt6
 PyQt6-WebEngine

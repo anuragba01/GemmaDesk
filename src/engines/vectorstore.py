@@ -8,7 +8,7 @@ indexing, semantic retrieval, and full-content bypass retrieval.
 import os
 import logging
 from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from rag import prompts
 
 log = logging.getLogger("rag.vectorstore")
@@ -27,18 +27,10 @@ class VectorStoreEngine:
         """
         self.chroma_dir = chroma_dir
         
-        log.info("Loading local embeddings (%s)...", embed_model)
+        log.info("Loading FastEmbed embeddings (%s)...", embed_model)
         try:
-            import torch
-            _device = "cuda" if torch.cuda.is_available() else ("mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu")
-        except ImportError:
-            _device = "cpu"
-        log.info("Nomic embeddings using device: %s", _device)
-        try:
-            self.embeddings = HuggingFaceEmbeddings(
+            self.embeddings = FastEmbedEmbeddings(
                 model_name=embed_model,
-                model_kwargs={'device': _device},
-                encode_kwargs={'normalize_embeddings': True}
             )
         except Exception as e:
             log.error("Failed to load local embeddings: %s", e)

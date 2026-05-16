@@ -51,6 +51,11 @@ cd gemmadesk
 ### 2. Installation
 Ensure you have Python 3.10+ installed. We recommend using `uv` for lightning-fast dependency management:
 ```bash
+# Create and activate virtual environment
+uv venv
+source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
+
+# Install dependencies
 uv pip install -r requirements.txt
 ```
 

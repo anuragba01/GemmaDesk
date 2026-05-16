@@ -16,6 +16,16 @@ GemmaDesk is a **unified, local-first application**. Unlike traditional RAG pipe
 GemmaDesk manages almost all dependencies automatically via Python. Ensure you have `uv` installed, then install all project dependencies:
 
 ```bash
+# 1. Create a virtual environment
+uv venv
+
+# 2. Activate the environment
+# On Linux/macOS:
+source .venv/bin/activate
+# On Windows:
+.venv\Scripts\activate
+
+# 3. Install dependencies
 uv pip install -r requirements.txt
 ```
 

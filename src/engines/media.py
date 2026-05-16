@@ -34,23 +34,24 @@ class MediaEngine:
 
     def _get_whisper(self):
         if self._whisper is None:
-            log.info("Loading Whisper model (%s)...", self.whisper_model)
+            log.info("Loading Faster-Whisper model (%s)...", self.whisper_model)
             try:
-                import whisper
-                self._whisper = whisper.load_model(self.whisper_model)
-                log.info("Whisper loaded.")
+                from faster_whisper import WhisperModel
+                # Using CPU and int8 for ultra-light inference
+                self._whisper = WhisperModel(self.whisper_model, device="cpu", compute_type="int8")
+                log.info("Faster-Whisper loaded.")
             except Exception as e:
-                log.error("Whisper load failed: %s", e)
+                log.error("Faster-Whisper load failed: %s", e)
                 raise
         return self._whisper
 
-    def _segments_to_docs(self, segments: list, source: str, kind: str) -> list:
+    def _segments_to_docs(self, segments, source: str, kind: str) -> list:
         docs = []
         for seg in segments:
-            ts = seg.get("start", 0)
+            ts = seg.start
             label = f"[{int(ts)//60:02d}:{int(ts)%60:02d}]"
             docs.append(Document(
-                page_content=f"{label} {seg['text'].strip()}",
+                page_content=f"{label} {seg.text.strip()}",
                 metadata={"source": source, "type": kind, "timestamp": ts},
             ))
         return docs
@@ -67,8 +68,8 @@ class MediaEngine:
         """
         log.info("Transcribing audio: %s", path)
         model = self._get_whisper()
-        result = model.transcribe(path, verbose=False, initial_prompt=prompts.WHISPER_INITIAL_PROMPT)
-        docs = self._segments_to_docs(result["segments"], path, "audio")
+        segments, info = model.transcribe(path, initial_prompt=prompts.WHISPER_INITIAL_PROMPT)
+        docs = self._segments_to_docs(segments, path, "audio")
         log.info("Audio transcribed: %d segment(s).", len(docs))
         return self.doc_engine.index_docs(docs)
 
@@ -93,8 +94,8 @@ class MediaEngine:
             )
             log.info("ffmpeg audio extraction done.")
             model = self._get_whisper()
-            result = model.transcribe(tmp_wav, verbose=False, initial_prompt=prompts.WHISPER_INITIAL_PROMPT)
-            docs = self._segments_to_docs(result["segments"], path, "video")
+            segments, info = model.transcribe(tmp_wav, initial_prompt=prompts.WHISPER_INITIAL_PROMPT)
+            docs = self._segments_to_docs(segments, path, "video")
             log.info("Video transcribed: %d segment(s).", len(docs))
             return self.doc_engine.index_docs(docs)
         except subprocess.CalledProcessError as e:
