@@ -14,15 +14,36 @@ def check_dependencies() -> list:
     if not os.path.exists(gemma_path):
         missing.append("Gemma 4 LiteRT Model (2.5 GB)")
         
-    # Check Nomic Embedding Cache
-    nomic_cache = os.path.expanduser("~/.cache/huggingface/hub/models--nomic-ai--nomic-embed-text-v1.5")
-    if not os.path.exists(nomic_cache):
-        missing.append("Nomic Embedding Model (500 MB)")
+    # Check FastEmbed Embedding Model (Programmatic Check)
+    try:
+        from fastembed import TextEmbedding
+        # We check if the model is already in the cache without downloading
+        # By setting local_files_only or checking the list
+        models = TextEmbedding.list_supported_models()
+        # FastEmbed doesn't have a great 'check only' API, so we check the default cache
+        cache_dir = os.path.expanduser("~/.cache/fastembed/models")
+        if not os.path.exists(cache_dir) or not os.listdir(cache_dir):
+            missing.append("BGE Embedding Model (130 MB)")
+    except Exception:
+        missing.append("BGE Embedding Model (130 MB)")
         
-    # Check Whisper Cache
-    whisper_cache = os.path.expanduser("~/.cache/whisper/base.pt")
-    if not os.path.exists(whisper_cache):
-        missing.append("Whisper Base Model (140 MB)")
+    # Check Faster-Whisper (Programmatic Check)
+    try:
+        from huggingface_hub import scan_cache_dir
+        # Check if faster-whisper-base is in the HF cache
+        cache_info = scan_cache_dir()
+        found_whisper = False
+        for repo in cache_info.repos:
+            if "faster-whisper-base" in repo.repo_id:
+                found_whisper = True
+                break
+        if not found_whisper:
+            missing.append("Whisper Base Model (140 MB)")
+    except Exception:
+        # Fallback to path check if hf_hub fails
+        whisper_cache = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")
+        if not os.path.exists(whisper_cache):
+            missing.append("Whisper Base Model (140 MB)")
         
     return missing
 
@@ -35,6 +56,12 @@ def render_setup_page(missing_deps: list):
     st.title("Welcome to GemmaDesk")
     st.markdown("Before we can start your offline, multimodal RAG experience, we need to download the core AI models to your local machine.")
     
+    if not missing_deps:
+        st.success("All models are already downloaded!")
+        if st.button("Start GemmaDesk", type="primary"):
+            st.rerun()
+        return
+
     st.error("The following models are missing from your system:")
     for dep in missing_deps:
         st.markdown(f"- **{dep}**")
@@ -56,16 +83,16 @@ def render_setup_page(missing_deps: list):
                     )
                     st.write("✅ Gemma 4 downloaded.")
                 
-                if "Nomic Embedding Model (500 MB)" in missing_deps:
-                    st.write("Downloading Nomic Embeddings...")
-                    from sentence_transformers import SentenceTransformer
-                    SentenceTransformer("nomic-ai/nomic-embed-text-v1.5")
-                    st.write("✅ Nomic Embeddings downloaded.")
+                if "BGE Embedding Model (130 MB)" in missing_deps:
+                    st.write("Downloading BGE Embedding Model (ONNX)...")
+                    from fastembed import TextEmbedding
+                    TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+                    st.write("✅ BGE Embedding Model downloaded.")
                     
                 if "Whisper Base Model (140 MB)" in missing_deps:
-                    st.write("Downloading Whisper Base...")
-                    import whisper
-                    whisper.load_model("base")
+                    st.write("Downloading Faster-Whisper Base...")
+                    from faster_whisper import WhisperModel
+                    WhisperModel("base", device="cpu", compute_type="int8")
                     st.write("✅ Whisper Base downloaded.")
                     
                 status.update(label="All models downloaded successfully!", state="complete", expanded=False)

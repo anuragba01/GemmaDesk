@@ -20,7 +20,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # Add src to path so we can import our custom engines and utilities
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
-from app import setup
+import setup
 
 # Run pre-flight dependency checks BEFORE loading heavy AI modules
 missing_deps = setup.check_dependencies()
@@ -45,7 +45,6 @@ warnings.filterwarnings("ignore")
 log = logging.getLogger("gemmadesk.app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("transformers").setLevel(logging.ERROR)
-logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
 st.set_page_config(page_title="GemmaDesk", layout="wide")
 

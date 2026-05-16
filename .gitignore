@@ -14,3 +14,10 @@ chat_sessions/
 video_script.md
 kaggle_writeup.md
 abc.txt
+
+# Build Artifacts
+build/
+dist/
+*.spec
+*.AppImage
+appimagetool
