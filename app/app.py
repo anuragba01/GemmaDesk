@@ -20,14 +20,24 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # Add src to path so we can import our custom engines and utilities
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
+import setup
+
+# Run pre-flight dependency checks BEFORE loading heavy AI modules
+missing_deps = setup.check_dependencies()
+if missing_deps:
+    setup.render_setup_page(missing_deps)
+    st.stop() # Halts app.py execution until all dependencies are downloaded
+
+# -- Now it is safe to import the heavy engines --
 from engines.document import DocumentEngine
 from engines.vectorstore import VectorStoreEngine
 from rag.gemma import GemmaEngine
 from engines.media import MediaEngine
 from engines.vision import VisionEngine
 from rag.rag import CHROMA_DIR, EMBED_MODEL, IMAGE_DIR, IMAGE_MANIFEST, MODEL_PATH, MultimodalRAG
+UPLOAD_DIR = "./uploaded_media"
 from utilities import chat_storage, profile
-from utilities.chat_ingestion import ChatHistoryIngestion
+from engines.chat_ingestion import ChatHistoryIngestion
 import threading
 
 # Global configurations and logging setup
@@ -148,10 +158,9 @@ with st.sidebar:
         for uf in uploaded_files:
             ext = Path(uf.name).suffix.lower()
             
-            # Save uploaded file to a temporary location for the engines to read
-            dest_dir = os.path.join(tempfile.gettempdir(), "gemmadesk_uploads")
-            os.makedirs(dest_dir, exist_ok=True)
-            tmp_path = os.path.join(dest_dir, uf.name)
+            # Save uploaded file to a persistent location for the engines to read
+            os.makedirs(UPLOAD_DIR, exist_ok=True)
+            tmp_path = os.path.join(UPLOAD_DIR, uf.name)
             
             with open(tmp_path, "wb") as f:
                 f.write(uf.getvalue())
@@ -188,9 +197,6 @@ with st.sidebar:
 
             except Exception as e:
                 st.error(f"{uf.name}: {e}")
-            finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
 
         st.rerun()
 
