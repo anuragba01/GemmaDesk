@@ -3,46 +3,52 @@
 Welcome to the GemmaDesk project! This guide will help you set up and run the local Offline Multimodal RAG study tool.
 
 ## Architecture Overview
-This application is split into two main components:
-1. **Frontend / RAG Engine (`app/app.py` & `src/rag/rag.py`):** A Streamlit interface that handles file uploads, chunking, and ChromaDB vector storage.
-2. **Backend AI Engine (`src/utilities/litert_server.py`):** A local FastAPI server that wraps the lightweight `gemma-4-E4B-it.litertlm` (LiteRT) model and serves an OpenAI-compatible `/v1/chat/completions` endpoint.
+GemmaDesk is a **unified, local-first application**. Unlike traditional RAG pipelines that rely on cloud APIs or separate heavy servers, GemmaDesk runs entirely in a single process:
+
+1. **Frontend / UI:** Built with Streamlit, handling file uploads and conversation history.
+2. **Unified RAG Engine:** A single Python backend that coordinates:
+   - **LiteRT (Gemma 4):** Our lightweight LLM loaded directly into the app memory.
+   - **ChromaDB:** Local vector storage for documents, videos, and chat history.
+   - **Multi-Engine Pipeline:** Dedicated handlers for PDF parsing, video clipping (FFmpeg), and image vision.
 
 ## 1. Setup & Installation
 
-Ensure you have `uv` installed, then install all project dependencies:
+GemmaDesk manages almost all dependencies automatically via Python. Ensure you have `uv` installed, then install all project dependencies:
 
 ```bash
 uv pip install -r requirements.txt
 ```
 
-## 2. Download the Model
+> [!NOTE]  
+> **No System FFmpeg Required:** We use `imageio-ffmpeg`, which automatically downloads a portable FFmpeg binary into your virtual environment. You do NOT need to run `sudo apt install`.
 
-The application requires the 4-bit compressed LiteRT Gemma model (~3.6 GB). Because Gemma is gated by Google, you must provide a HuggingFace Token.
+## 2. Automated Model Setup
 
-1. Go to HuggingFace, accept the Gemma 4 terms.
-2. Get your Access Token from your HuggingFace settings.
-3. Run the downloader script:
+The first time you run GemmaDesk, it will detect if you are missing the required AI models (Gemma 4, Nomic Embeddings, and Whisper). 
 
-```bash
-HF_TOKEN="hf_YOUR_TOKEN_HERE" uv run python download_model.py
-```
-
-*This will download `gemma-4-E4B-it.litertlm` into the root directory.*
+1. Launch the application (see below).
+2. The UI will redirect you to a **Setup Screen**.
+3. Click **"Download Missing Models"**.
+4. The app will automatically pull ~3.2GB of models from HuggingFace and cache them locally. 
+5. Once finished, the app will auto-refresh into the Chat Interface.
 
 ## 3. Running the Application
 
-GemmaDesk now runs entirely in a **single terminal**. The AI model is loaded directly into the Streamlit process.
+There are two ways to run GemmaDesk:
 
-### Start the Application
+### A. Desktop Mode (Recommended)
+To run GemmaDesk as a standalone native desktop window:
+```bash
+python3 script/launcher.py
+```
 
+### B. Developer Mode
+To run it in your default web browser:
 ```bash
 uv run streamlit run app/app.py
 ```
 
-> [!NOTE]  
-> The first time you run this, or whenever you make a code change, it will take ~20-30 seconds to load the 3.6GB model into memory. Once loaded, the chat responses will be instant.
-
 ## Troubleshooting
-- **Model Not Found Error:** Ensure the `.litertlm` file downloaded successfully and is in the root directory.
-- **Connection Refused:** Ensure Terminal 1 (Uvicorn) is running properly on port 8000 before sending chats in Streamlit.
-- **Port 8501 / 8000 in use:** Kill existing zombie processes or specify different ports (`--port 8001` for uvicorn, `--server.port 8502` for streamlit) and update `rag.py` to match.
+- **Slow First Load:** Loading the 2.5GB model into memory takes ~15-20 seconds on the first run of a session. Subsequent chats are near-instant.
+- **GPU Acceleration:** By default, GemmaDesk tries to use your GPU for vision tasks. If it fails, it will automatically fallback to CPU mode (check terminal logs for "CPU fallback").
+- **Missing Directory:** Ensure you have write permissions in the project root so the app can create the `model/`, `chroma_db/`, and `uploaded_media/` folders.
