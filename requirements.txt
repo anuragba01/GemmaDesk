@@ -1,8 +1,5 @@
 # GemmaDesk — Python dependencies
 # Install: uv pip install -r requirements.txt
-#
-# System dependency (install separately):
-#   sudo apt install ffmpeg
 
 torch
 torchvision
@@ -19,3 +16,10 @@ pypdf
 openai-whisper
 protobuf<=3.20.3
 uvicorn
+pytest
+pytest-mock
+imageio-ffmpeg
+pywebview
+PyQt6
+PyQt6-WebEngine
+qtpy
