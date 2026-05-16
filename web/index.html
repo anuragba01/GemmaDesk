@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GemmaDesk - The Offline AI Desk</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar fade-in">
+        <div class="logo">GemmaDesk</div>
+        <div class="nav-links">
+            <a href="#about">About</a>
+            <a href="#features">Features</a>
+            <a href="#access">Access</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="hero-content fade-in-up">
+            <h1>Your Ultimate Offline AI Desk</h1>
+            <p>A powerful, private, multimodal Retrieval-Augmented Generation (RAG) assistant running entirely on your local machine.</p>
+            
+            <div class="cta-group">
+                <a href="#" class="btn primary-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    Download Desktop App
+                </a>
+                <a href="https://github.com/yourusername/gemmadesk" target="_blank" class="btn secondary-btn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+                    View on GitHub
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <section id="about" class="section">
+        <div class="container fade-in-up">
+            <h2>Why GemmaDesk?</h2>
+            <p class="subtitle">Complete privacy meets cutting-edge multimodal intelligence.</p>
+            
+            <div class="grid-3">
+                <div class="card">
+                    <div class="icon">🔒</div>
+                    <h3>100% Offline</h3>
+                    <p>No internet required. Your documents, videos, and queries never leave your local machine. Powered by LiteRT and ChromaDB.</p>
+                </div>
+                <div class="card">
+                    <div class="icon">🎬</div>
+                    <h3>Multimodal & Video</h3>
+                    <p>Chat with PDFs, Images, and Videos. Features dynamic temporal clipping that instantly pulls exactly the video frame you ask for.</p>
+                </div>
+                <div class="card">
+                    <div class="icon">⚡</div>
+                    <h3>Semantic Routing</h3>
+                    <p>Smart intent gateways automatically detect if you want a precise answer or a full document summary, adjusting retrieval on the fly.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="access" class="section alt-bg">
+        <div class="container fade-in-up">
+            <h2>How to Access</h2>
+            
+            <div class="access-steps">
+                <div class="step-card">
+                    <h3>Option 1: Desktop App</h3>
+                    <p>The easiest way to experience GemmaDesk. Download the pre-packaged executable, double click, and start chatting.</p>
+                    <a href="#" class="btn primary-btn small-btn">Download (.AppImage/.exe)</a>
+                </div>
+                
+                <div class="step-card">
+                    <h3>Option 2: From Source</h3>
+                    <p>Clone the repository and run the local Streamlit server for full development access and custom Python launchers.</p>
+                    <code>git clone https://github.com/yourusername/gemmadesk.git</code>
+                    <code>uv pip install -r requirements.txt</code>
+                    <code>python3 script/launcher.py</code>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p>Built for the Hackathon. Powered by LiteRT, Streamlit, and Open Source AI.</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
