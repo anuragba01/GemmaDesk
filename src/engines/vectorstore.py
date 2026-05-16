@@ -126,23 +126,6 @@ class VectorStoreEngine:
             log.error("get_all_chunks failed: %s", e)
             return []
 
-    def get_video_duration(self, path: str) -> float:
-        """Finds the maximum timestamp from all chunks of a specific video."""
-        try:
-            where = {"source": path}
-            data = self.vectorstore.get(where=where, limit=10000, include=["metadatas"])
-            max_ts = 0.0
-            if data and data.get("metadatas"):
-                for meta in data["metadatas"]:
-                    if meta and "timestamp" in meta:
-                        ts = float(meta["timestamp"])
-                        if ts > max_ts:
-                            max_ts = ts
-            return max_ts
-        except Exception as e:
-            log.error("get_video_duration failed: %s", e)
-            return 0.0
-
     def search_chat_history(self, query: str, session_id: str, k: int = 4) -> list:
         """
         Semantic search restricted to chat history blocks for a specific session.

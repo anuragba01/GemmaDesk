@@ -70,6 +70,100 @@ class MultimodalRAG:
         self.gateway = IntentGateway(self.vector_store.embeddings)
         self.image_paths = self.vision_engine.get_valid_images()
 
+    def _build_media_durations(self, media_paths: list) -> dict:
+        durations = {}
+        for path in media_paths:
+            dur = self.media_engine.get_media_duration(path)
+            if dur > 0:
+                durations[os.path.basename(path)] = dur
+        return durations
+
+    def _is_media_path(self, path: str) -> bool:
+        return path.endswith((".mp4", ".mov", ".avi", ".mp3", ".wav"))
+
+    def _detect_media_need(self, question: str) -> str:
+        lowered = question.lower()
+        visual_hits = any(token in lowered for token in (
+            "show", "see", "look", "image", "frame", "screen", "picture", "visual"
+        ))
+        audio_hits = any(token in lowered for token in (
+            "sound", "music", "voice", "hear", "audio", "listen"
+        ))
+        if visual_hits and audio_hits:
+            return "multimodal"
+        if visual_hits:
+            return "visual"
+        if audio_hits:
+            return "audio"
+        return "text_only"
+
+    def _get_timestamp_context_docs(self, media_paths: list, explicit_times: list[int], limit: int = 200) -> list:
+        if not media_paths or not explicit_times:
+            return []
+
+        try:
+            docs = self.vector_store.get_all_chunks(filter_paths=media_paths, limit=limit)
+        except Exception as e:
+            log.warning("Timestamp context retrieval failed: %s", e)
+            return []
+
+        candidates = []
+        for doc in docs:
+            timestamp = doc.metadata.get("timestamp")
+            source = doc.metadata.get("source")
+            if source not in media_paths or timestamp is None:
+                continue
+            try:
+                ts_value = float(timestamp)
+            except (TypeError, ValueError):
+                continue
+            distance = min(abs(ts_value - requested) for requested in explicit_times)
+            candidates.append((distance, ts_value, doc))
+
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        selected = []
+        seen = set()
+        for _, ts_value, doc in candidates:
+            key = (doc.metadata.get("source"), ts_value, doc.page_content)
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(doc)
+            if len(selected) >= min(4, len(candidates)):
+                break
+        return selected
+
+    def _merge_docs(self, primary_docs: list, fallback_docs: list) -> list:
+        merged = []
+        seen = set()
+        for doc in primary_docs + fallback_docs:
+            key = (
+                doc.metadata.get("source"),
+                doc.metadata.get("timestamp"),
+                doc.page_content,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(doc)
+        return merged
+
+    def _validate_explicit_timestamps(self, explicit_times: list[int], media_durations: dict, media_paths: list) -> str | None:
+        if not explicit_times or not media_paths:
+            return None
+
+        for path in media_paths:
+            duration = media_durations.get(os.path.basename(path), 0)
+            if duration <= 0:
+                continue
+            for ts in explicit_times:
+                if ts > duration:
+                    return (
+                        f"{os.path.basename(path)} is only {duration:.1f} seconds long, "
+                        f"so {ts} seconds is out of range."
+                    )
+        return None
+
     def _retrieve_text_docs(self, question: str, filter_paths: list = None, k: int = 4) -> list:
         retriever = self.vector_store.get_retriever(filter_paths=filter_paths, k=k)
         return retriever.invoke(question)
@@ -100,7 +194,7 @@ class MultimodalRAG:
             ))
         return "\n\n".join(parts)
 
-    def _build_prompt(self, question: str, docs: list, image_paths: list, user_profile: dict = None, video_durations: dict = None) -> tuple[str, str]:
+    def _build_prompt(self, question: str, docs: list, image_paths: list, user_profile: dict = None, media_durations: dict = None, apply_confusion_gateway: bool = True) -> tuple[str, str]:
         """
         Assembles the master prompt sent to the LLM.
         Order of assembly: User Profile -> System Rules -> Intent Modifiers -> Images -> Context -> Question.
@@ -108,10 +202,10 @@ class MultimodalRAG:
         context = self._build_text_context(docs)
         system_text = prompts.CORE_SYSTEM_PROMPT
         
-        if video_durations:
+        if media_durations:
             system_text += "\n\n### MEDIA METADATA:\n"
-            for v, d in video_durations.items():
-                system_text += f"- Video '{v}' has a total duration of {int(d)} seconds.\n"
+            for v, d in media_durations.items():
+                system_text += f"- Media '{v}' has a total duration of {int(d)} seconds.\n"
         
         if user_profile:
             profile_str = "\n### USER PROFILE:\n"
@@ -126,7 +220,7 @@ class MultimodalRAG:
             system_text = profile_str + "\n" + system_text
 
         # Gateway Check
-        if self.gateway.is_confused(question):
+        if apply_confusion_gateway and self.gateway.is_confused(question):
             system_text += f"\n\n{prompts.GATEWAY_CONFUSION_MODIFIER}"
 
         image_text = ""
@@ -143,11 +237,22 @@ class MultimodalRAG:
 
     def _source_names(self, docs: list, image_paths: list) -> list:
         sources = {os.path.basename(doc.metadata.get("source", "unknown")) for doc in docs}
-        sources.update(os.path.basename(path) for path in image_paths)
+        sources.update(
+            os.path.basename(path)
+            for path in image_paths
+            if os.path.dirname(os.path.abspath(path)) != "/tmp"
+        )
         return sorted(sources)
 
-    def _answer(self, question: str, history: list, docs: list, image_paths: list, user_profile: dict = None, video_durations: dict = None) -> dict:
-        system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile, video_durations)
+    def _answer(self, question: str, history: list, docs: list, image_paths: list, user_profile: dict = None, media_durations: dict = None, apply_confusion_gateway: bool = True) -> dict:
+        system_text, prompt_text = self._build_prompt(
+            question,
+            docs,
+            image_paths,
+            user_profile,
+            media_durations,
+            apply_confusion_gateway,
+        )
         answer = self.gemma_engine.answer({
             "system_text": system_text,
             "prompt_text": prompt_text,
@@ -164,42 +269,52 @@ class MultimodalRAG:
         text_paths, image_paths = self._split_selected_paths(filter_paths)
 
         docs = []
+        explicit_times = extract_seconds(question)
+        target_media = [p for p in text_paths if self._is_media_path(p)] if text_paths else []
+        target_videos = [p for p in target_media if p.endswith((".mp4", ".mov", ".avi"))]
+        media_need = self._detect_media_need(question)
+        skip_gateway = bool(explicit_times and target_media)
         if text_paths:
             try:
-                docs = self._retrieve_text_docs(question, filter_paths=text_paths)
+                if skip_gateway and target_media:
+                    docs = self._get_timestamp_context_docs(target_media, explicit_times)
+                if not docs:
+                    docs = self._retrieve_text_docs(question, filter_paths=text_paths)
             except Exception as e:
                 log.warning("Text retrieval failed: %s", e)
 
-        # Regex Intent Extraction & Error Handling
-        explicit_times = extract_seconds(question)
-        explicit_clip_extracted = False
-        target_videos = [p for p in text_paths if p.endswith(('.mp4', '.mov', '.avi'))] if text_paths else []
+        media_durations = self._build_media_durations(target_media)
+        duration_error = self._validate_explicit_timestamps(explicit_times, media_durations, target_media)
+        if duration_error:
+            return {
+                "answer": duration_error,
+                "sources": [os.path.basename(p) for p in target_media],
+            }
         
         if explicit_times:
-            if not target_videos:
+            if not target_media:
                 return {
-                    "answer": "Please select a specific video from the sidebar to extract timestamps from.",
+                    "answer": "Please select a specific media file from the sidebar to answer timestamp questions.",
                     "sources": []
                 }
-            for video in target_videos:
-                if not os.path.exists(video):
+            for media_path in target_media:
+                if not os.path.exists(media_path):
                     return {
-                        "answer": "Video is removed from storage, please upload again.",
+                        "answer": "Media file is removed from storage, please upload again.",
                         "sources": []
                     }
-                for ts in explicit_times:
-                    clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
-                    if clips:
-                        image_paths.extend(clips)
-                        explicit_clip_extracted = True
-                        log.info(f"Explicitly extracted video clips at {ts}s: {clips}")
-
-        # Fetch video durations
-        video_durations = {}
-        for v in target_videos:
-            dur = self.vector_store.get_video_duration(v)
-            if dur > 0:
-                video_durations[os.path.basename(v)] = dur
+            timestamp_docs = self._get_timestamp_context_docs(target_media, explicit_times)
+            docs = self._merge_docs(timestamp_docs, docs)
+            if media_need in {"visual", "audio", "multimodal"} and target_videos:
+                for video in target_videos:
+                    for ts in explicit_times:
+                        clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
+                        if clips:
+                            image_paths.extend(clips)
+                            log.info("Extracted explicit support clips at %ss: %s", ts, clips)
+                            break
+                    if image_paths:
+                        break
 
         # --- Long-term chat memory via RAG (Addition 2a) ---
         if session_id:
@@ -208,7 +323,7 @@ class MultimodalRAG:
                 log.info("Prepending %d chat history block(s) from RAG.", len(chat_docs))
                 docs = chat_docs + docs
 
-        return self._answer(question, history, docs, image_paths, user_profile, video_durations)
+        return self._answer(question, history, docs, image_paths, user_profile, media_durations, not skip_gateway)
 
     def query_stream(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, fetch_full: bool = False, session_id: str = None) -> dict:
         """
@@ -228,49 +343,60 @@ class MultimodalRAG:
         """
         log.info("query_stream: '%s'", question[:80])
         text_paths, image_paths = self._split_selected_paths(filter_paths)
+        explicit_times = extract_seconds(question)
+        target_media = [p for p in text_paths if self._is_media_path(p)] if text_paths else []
+        target_videos = [p for p in target_media if p.endswith((".mp4", ".mov", ".avi"))]
+        media_need = self._detect_media_need(question)
+        skip_gateway = bool(explicit_times and target_media)
 
-        if not fetch_full and self.gateway.is_summary_request(question):
+        if not skip_gateway and not fetch_full and self.gateway.is_summary_request(question):
             log.info("Gateway detected summary intent. Auto-enabling fetch_full mode.")
             fetch_full = True
 
         docs = []
         if text_paths:
             try:
-                if fetch_full:
+                if skip_gateway and target_media:
+                    docs = self._get_timestamp_context_docs(target_media, explicit_times)
+                elif fetch_full:
                     docs = self.vector_store.get_all_chunks(filter_paths=text_paths, limit=30)
-                else:
+                if not docs:
                     docs = self._retrieve_text_docs(question, filter_paths=text_paths)
             except Exception as e:
                 log.warning("Text retrieval failed: %s", e)
 
-        # Regex Intent Extraction & Error Handling
-        explicit_times = extract_seconds(question)
-        explicit_clip_extracted = False
-        target_videos = [p for p in text_paths if p.endswith(('.mp4', '.mov', '.avi'))] if text_paths else []
+        media_durations = self._build_media_durations(target_media)
+        duration_error = self._validate_explicit_timestamps(explicit_times, media_durations, target_media)
+        if duration_error:
+            def duration_error_stream():
+                yield duration_error
+            return {
+                "stream": duration_error_stream(),
+                "sources": [os.path.basename(p) for p in target_media],
+            }
         
         if explicit_times:
-            if not target_videos:
+            if not target_media:
                 def error_stream():
-                    yield "Please select a specific video from the sidebar to extract timestamps from."
+                    yield "Please select a specific media file from the sidebar to answer timestamp questions."
                 return {"stream": error_stream(), "sources": []}
-            for video in target_videos:
-                if not os.path.exists(video):
+            for media_path in target_media:
+                if not os.path.exists(media_path):
                     def missing_video_stream():
-                        yield "Video is removed from storage, please upload again."
+                        yield "Media file is removed from storage, please upload again."
                     return {"stream": missing_video_stream(), "sources": []}
-                for ts in explicit_times:
-                    clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
-                    if clips:
-                        image_paths.extend(clips)
-                        explicit_clip_extracted = True
-                        log.info(f"Explicitly extracted video clips at {ts}s: {clips}")
-
-        # Fetch video durations
-        video_durations = {}
-        for v in target_videos:
-            dur = self.vector_store.get_video_duration(v)
-            if dur > 0:
-                video_durations[os.path.basename(v)] = dur
+            timestamp_docs = self._get_timestamp_context_docs(target_media, explicit_times)
+            docs = self._merge_docs(timestamp_docs, docs)
+            if media_need in {"visual", "audio", "multimodal"} and target_videos:
+                for video in target_videos:
+                    for ts in explicit_times:
+                        clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
+                        if clips:
+                            image_paths.extend(clips)
+                            log.info("Extracted explicit support clips at %ss: %s", ts, clips)
+                            break
+                    if image_paths:
+                        break
 
         # --- Long-term chat memory via RAG (Addition 2a) ---
         # Prefilter: type == "chat" AND session_id == current session
@@ -282,24 +408,14 @@ class MultimodalRAG:
                 # Prepend so they appear before document chunks in the context
                 docs = chat_docs + docs
 
-        # Video auto-clipping feature
-        if not explicit_clip_extracted:
-            for doc in docs:
-                if doc.metadata.get("type") == "video" and "timestamp" in doc.metadata:
-                    ts = float(doc.metadata["timestamp"])
-                    video_path = doc.metadata.get("source")
-                    if video_path:
-                        if not os.path.exists(video_path):
-                            def missing_video_stream():
-                                yield "Video is removed from storage, please upload again."
-                            return {"stream": missing_video_stream(), "sources": []}
-                        clips = self.media_engine.extract_clip(video_path, ts - 10, ts + 20)
-                        if clips:
-                            image_paths.extend(clips)
-                            log.info(f"Appended extracted video clips to visual context: {clips}")
-                        break # Only extract one clip per query to save compute
-
-        system_text, prompt_text = self._build_prompt(question, docs, image_paths, user_profile, video_durations)
+        system_text, prompt_text = self._build_prompt(
+            question,
+            docs,
+            image_paths,
+            user_profile,
+            media_durations,
+            not skip_gateway,
+        )
         stream = self.gemma_engine.answer_stream({
             "system_text": system_text,
             "prompt_text": prompt_text,

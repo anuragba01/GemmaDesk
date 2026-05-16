@@ -9,6 +9,7 @@ import os
 import tempfile
 import subprocess
 import logging
+import re
 import imageio_ffmpeg
 from langchain_core.documents import Document
 from rag import prompts
@@ -44,6 +45,27 @@ class MediaEngine:
                 log.error("Faster-Whisper load failed: %s", e)
                 raise
         return self._whisper
+
+    def get_media_duration(self, path: str) -> float:
+        """Returns exact media duration in seconds using the bundled ffmpeg binary."""
+        try:
+            result = subprocess.run(
+                [self.ffmpeg_exe, "-i", path],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as e:
+            log.warning("ffmpeg duration probe failed for %s: %s", path, e)
+            return 0.0
+
+        match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+        if not match:
+            log.warning("Could not parse media duration for %s.", path)
+            return 0.0
+
+        hours, minutes, seconds = match.groups()
+        return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
     def _segments_to_docs(self, segments, source: str, kind: str) -> list:
         docs = []

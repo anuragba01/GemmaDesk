@@ -10,6 +10,10 @@ import numpy as np
 
 log = logging.getLogger("rag.gateway")
 
+
+def _normalize_query(query: str) -> str:
+    return " ".join(query.lower().split())
+
 class IntentGateway:
     """
     Gateway to classify user intent based on queries to route them to the appropriate RAG logic.
@@ -52,6 +56,30 @@ class IntentGateway:
             "tell me what is the key point of this document",
             "what is prerequisite for this document"
         ]
+        self.summary_keywords = (
+            "summary",
+            "summarize",
+            "overview",
+            "key point",
+            "key points",
+            "whole document",
+            "whole thing",
+            "entire material",
+            "what is this document about",
+            "tell me everything about",
+            "prerequisite",
+            "real life use",
+        )
+        self.confusion_keywords = (
+            "confused",
+            "makes no sense",
+            "don't understand",
+            "do not understand",
+            "explain simply",
+            "too hard",
+            "what does this mean",
+            "frustrating",
+        )
         
         # Pre-compute embeddings for triggers
         try:
@@ -70,6 +98,10 @@ class IntentGateway:
             self.confusion_embeddings = None
             self.summary_embeddings = None
 
+    def _matches_keywords(self, query: str, keywords: tuple[str, ...]) -> bool:
+        normalized = _normalize_query(query)
+        return any(keyword in normalized for keyword in keywords)
+
     def is_summary_request(self, query: str, threshold: float = 0.80) -> bool:
         """
         Checks if the user query is a request for a document summary.
@@ -81,6 +113,9 @@ class IntentGateway:
         Returns:
             bool: True if the query indicates a summary request, False otherwise.
         """
+        if self._matches_keywords(query, self.summary_keywords):
+            log.info("Gateway triggered SUMMARY mode via keyword rule.")
+            return True
         if self.summary_embeddings is None:
             return False
         
@@ -123,6 +158,9 @@ class IntentGateway:
         Returns:
             bool: True if the query indicates confusion, False otherwise.
         """
+        if self._matches_keywords(query, self.confusion_keywords):
+            log.info("Gateway triggered CONFUSION mode via keyword rule.")
+            return True
         if self.confusion_embeddings is None:
             return False
         
