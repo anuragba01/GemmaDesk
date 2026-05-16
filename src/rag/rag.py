@@ -182,6 +182,11 @@ class MultimodalRAG:
                     "sources": []
                 }
             for video in target_videos:
+                if not os.path.exists(video):
+                    return {
+                        "answer": "Video is removed from storage, please upload again.",
+                        "sources": []
+                    }
                 for ts in explicit_times:
                     clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
                     if clips:
@@ -249,6 +254,10 @@ class MultimodalRAG:
                     yield "Please select a specific video from the sidebar to extract timestamps from."
                 return {"stream": error_stream(), "sources": []}
             for video in target_videos:
+                if not os.path.exists(video):
+                    def missing_video_stream():
+                        yield "Video is removed from storage, please upload again."
+                    return {"stream": missing_video_stream(), "sources": []}
                 for ts in explicit_times:
                     clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
                     if clips:
@@ -279,7 +288,11 @@ class MultimodalRAG:
                 if doc.metadata.get("type") == "video" and "timestamp" in doc.metadata:
                     ts = float(doc.metadata["timestamp"])
                     video_path = doc.metadata.get("source")
-                    if video_path and os.path.exists(video_path):
+                    if video_path:
+                        if not os.path.exists(video_path):
+                            def missing_video_stream():
+                                yield "Video is removed from storage, please upload again."
+                            return {"stream": missing_video_stream(), "sources": []}
                         clips = self.media_engine.extract_clip(video_path, ts - 10, ts + 20)
                         if clips:
                             image_paths.extend(clips)

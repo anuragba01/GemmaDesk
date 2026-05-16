@@ -1,3 +1,10 @@
+"""
+gemma.py - Gemma 4 LiteRT Integration Engine
+
+This module provides the GemmaEngine class which wraps the litert_lm engine 
+to handle multimodal (text, audio, image) RAG queries both synchronously 
+and via streaming.
+"""
 import logging
 
 import litert_lm
@@ -6,7 +13,18 @@ log = logging.getLogger("rag.gemma")
 
 
 class GemmaEngine:
+    """
+    Engine for interacting with the Gemma 4 LiteRT model.
+    Handles conversation history, multi-modal inputs (images, audio), and prompt construction.
+    """
+
     def __init__(self, model_path: str):
+        """
+        Initializes the Gemma LiteRT engine.
+        
+        Args:
+            model_path (str): The file path to the Gemma model.
+        """
         log.info("Loading LiteRT engine (Gemma 4)...")
         litert_lm.set_min_log_severity(litert_lm.LogSeverity.ERROR)
         try:
@@ -26,6 +44,15 @@ class GemmaEngine:
             log.info("Gemma engine ready (CPU fallback).")
 
     def answer(self, payload: dict) -> str:
+        """
+        Generates a complete, synchronous response from the Gemma model.
+        
+        Args:
+            payload (dict): A dictionary containing 'history', 'system_text', 'prompt_text', and 'image_paths'.
+            
+        Returns:
+            str: The generated text response.
+        """
         with self.engine.create_conversation() as conv:
             history = payload.get("history", [])
             image_paths = payload.get("image_paths", [])
@@ -61,6 +88,15 @@ class GemmaEngine:
             return response["content"][0]["text"]
 
     def answer_stream(self, payload: dict):
+        """
+        Generates a streaming response from the Gemma model.
+        
+        Args:
+            payload (dict): A dictionary containing 'history', 'system_text', 'prompt_text', and 'image_paths'.
+            
+        Yields:
+            str: Chunks of the generated text response.
+        """
         with self.engine.create_conversation() as conv:
             history = payload.get("history", [])
             image_paths = payload.get("image_paths", [])

@@ -1,10 +1,28 @@
+"""
+gateway.py - Intent Gateway for Query Routing
+
+This module provides the IntentGateway class which classifies user queries 
+into different intents (e.g., summary requests, expressions of confusion)
+using embedding-based cosine similarity.
+"""
 import logging
 import numpy as np
 
 log = logging.getLogger("rag.gateway")
 
 class IntentGateway:
+    """
+    Gateway to classify user intent based on queries to route them to the appropriate RAG logic.
+    Uses embeddings to detect requests for summarization or expressions of confusion.
+    """
+
     def __init__(self, embed_model):
+        """
+        Initializes the IntentGateway with an embedding model and precomputes embeddings for trigger phrases.
+        
+        Args:
+            embed_model: The embedding model instance used to embed documents and queries.
+        """
         self.embed_model = embed_model
         log.info("Initializing Intent Gateway with Nomic...")
         
@@ -53,6 +71,16 @@ class IntentGateway:
             self.summary_embeddings = None
 
     def is_summary_request(self, query: str, threshold: float = 0.80) -> bool:
+        """
+        Checks if the user query is a request for a document summary.
+        
+        Args:
+            query (str): The user's input query.
+            threshold (float, optional): The cosine similarity threshold for classification. Defaults to 0.80.
+            
+        Returns:
+            bool: True if the query indicates a summary request, False otherwise.
+        """
         if self.summary_embeddings is None:
             return False
         
@@ -72,9 +100,29 @@ class IntentGateway:
             return False
 
     def _cosine_similarity(self, vec_a, vec_b):
+        """
+        Computes the cosine similarity between two vectors.
+        
+        Args:
+            vec_a: First vector (numpy array).
+            vec_b: Second vector (numpy array).
+            
+        Returns:
+            float: The cosine similarity score.
+        """
         return np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b) + 1e-10)
 
     def is_confused(self, query: str, threshold: float = 0.85) -> bool:
+        """
+        Checks if the user query indicates confusion or frustration.
+        
+        Args:
+            query (str): The user's input query.
+            threshold (float, optional): The cosine similarity threshold for classification. Defaults to 0.85.
+            
+        Returns:
+            bool: True if the query indicates confusion, False otherwise.
+        """
         if self.confusion_embeddings is None:
             return False
         
