@@ -41,35 +41,52 @@ graph TD
 
 ## Getting Started
 
-### 1. Clone the Repository
-Open your terminal and run:
+> **⚠️ IMPORTANT — Clone to your Home Directory**
+> The AI model uses memory-mapping to load efficiently. Always clone and run GemmaDesk from your **home directory** (`~/`), not from an external drive or USB stick, to avoid load errors.
+
+### Prerequisites
+Install the required system libraries (one-time):
 ```bash
-git clone https://github.com/anuragba01/gemmadesk.git
-cd gemmadesk
+sudo apt install libxcb-cursor0 libgl1 python3-pip
 ```
 
-### 2. Installation
-Ensure you have Python 3.10+ installed. We recommend using `uv` for lightning-fast dependency management:
+### 1. Clone the Repository
 ```bash
-# Create and activate virtual environment
-uv venv
-source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
+git clone https://github.com/anuragba01/gemmadesk.git ~/gemmadesk
+cd ~/gemmadesk
+```
 
-# Install dependencies
+### 2. Install `uv` (Fast Python Package Manager)
+```bash
+pip install uv
+```
+> `uv` will automatically use the correct Python version. No manual Python install needed.
+
+### 3. Create Environment & Install Dependencies
+```bash
+uv venv
+source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
-### 3. Launch & Automated Setup
-GemmaDesk is designed to be self-bootstrapping. You only need to run the main application:
-
+### 4. Launch the App
 ```bash
 uv run streamlit run app/app.py
 ```
 
-- **First-Time Use:** If the AI models (~3.2GB) are missing, the app will automatically launch the **Setup Manager** UI to guide you through the download.
-- **Regular Use:** Once the models are downloaded, the same command will boot directly into the chat interface.
+### 5. First-Time Setup (Automatic)
+On first launch, the app will show a **Setup Manager** screen.
+Click **"Download Missing Models"** and wait for the AI models to download (~3.2 GB total):
 
-  ,
+| Model | Size | Purpose |
+|:---|:---|:---|
+| Gemma 4 LiteRT | ~2.5 GB | Core language model |
+| BGE Embeddings | ~130 MB | Semantic search |
+| Whisper Base | ~140 MB | Audio/video transcription |
+
+> These download **once only**. After that, the app runs completely offline.
+
+Once the download completes, the app automatically opens the main chat interface.
 
 ## Live Demo
 You can view the project details and access downloads on our landing page:

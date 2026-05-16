@@ -2,6 +2,9 @@ import os
 import streamlit as st
 import time
 
+# Use a permanent cache dir — fastembed defaults to /tmp which is wiped on reboot
+FASTEMBED_CACHE = os.path.expanduser("~/.cache/fastembed_models")
+
 def check_dependencies() -> list:
     """
     Checks if the heavy AI models have been downloaded to the local system.
@@ -12,38 +15,18 @@ def check_dependencies() -> list:
     # Check Gemma Model
     gemma_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model", "gemma-4-E4B-it.litertlm"))
     if not os.path.exists(gemma_path):
-        missing.append("Gemma 4 LiteRT Model (2.5 GB)")
+        missing.append("Gemma 4 LiteRT Model (3.5+ GB)")
         
-    # Check FastEmbed Embedding Model (Programmatic Check)
-    try:
-        from fastembed import TextEmbedding
-        # We check if the model is already in the cache without downloading
-        # By setting local_files_only or checking the list
-        models = TextEmbedding.list_supported_models()
-        # FastEmbed doesn't have a great 'check only' API, so we check the default cache
-        cache_dir = os.path.expanduser("~/.cache/fastembed/models")
-        if not os.path.exists(cache_dir) or not os.listdir(cache_dir):
-            missing.append("BGE Embedding Model (130 MB)")
-    except Exception:
+    # Check FastEmbed Embedding Model — uses permanent cache dir
+    # fastembed saves as: <cache_dir>/models--qdrant--bge-small-en-v1.5-onnx-q
+    bge_model_dir = os.path.join(FASTEMBED_CACHE, "models--qdrant--bge-small-en-v1.5-onnx-q")
+    if not os.path.exists(bge_model_dir):
         missing.append("BGE Embedding Model (130 MB)")
         
-    # Check Faster-Whisper (Programmatic Check)
-    try:
-        from huggingface_hub import scan_cache_dir
-        # Check if faster-whisper-base is in the HF cache
-        cache_info = scan_cache_dir()
-        found_whisper = False
-        for repo in cache_info.repos:
-            if "faster-whisper-base" in repo.repo_id:
-                found_whisper = True
-                break
-        if not found_whisper:
-            missing.append("Whisper Base Model (140 MB)")
-    except Exception:
-        # Fallback to path check if hf_hub fails
-        whisper_cache = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")
-        if not os.path.exists(whisper_cache):
-            missing.append("Whisper Base Model (140 MB)")
+    # Check Faster-Whisper
+    whisper_cache = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")
+    if not os.path.exists(whisper_cache):
+        missing.append("Whisper Base Model (140 MB)")
         
     return missing
 
@@ -57,8 +40,8 @@ def render_setup_page(missing_deps: list):
     st.markdown("Before we can start your offline, multimodal RAG experience, we need to download the core AI models to your local machine.")
     
     if not missing_deps:
-        st.success("All models are already downloaded!")
-        if st.button("Start GemmaDesk", type="primary"):
+        st.success("All models are ready!")
+        if st.button("Start GemmaDesk →", type="primary"):
             st.rerun()
         return
 
@@ -86,7 +69,8 @@ def render_setup_page(missing_deps: list):
                 if "BGE Embedding Model (130 MB)" in missing_deps:
                     st.write("Downloading BGE Embedding Model (ONNX)...")
                     from fastembed import TextEmbedding
-                    TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+                    os.makedirs(FASTEMBED_CACHE, exist_ok=True)
+                    TextEmbedding(model_name="BAAI/bge-small-en-v1.5", cache_dir=FASTEMBED_CACHE)
                     st.write("✅ BGE Embedding Model downloaded.")
                     
                 if "Whisper Base Model (140 MB)" in missing_deps:
@@ -96,8 +80,8 @@ def render_setup_page(missing_deps: list):
                     st.write("✅ Whisper Base downloaded.")
                     
                 status.update(label="All models downloaded successfully!", state="complete", expanded=False)
-                time.sleep(2)
-                st.rerun() # Refresh the page to boot the main app
+                time.sleep(1)
+                st.rerun()
                 
             except Exception as e:
                 status.update(label="Download failed.", state="error", expanded=True)

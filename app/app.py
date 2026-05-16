@@ -95,6 +95,9 @@ if not profile.has_profile():
 user_profile = profile.load_profile()
 
 # --- Chat Session Initialization ---
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
 if "session_id" not in st.session_state:
     st.session_state.session_id = chat_storage.generate_session_id()
 
@@ -151,6 +154,7 @@ with st.sidebar:
         "PDF · TXT · MP3 · WAV · MP4 · JPG · PNG",
         type=["pdf", "txt", "mp3", "wav", "mp4", "jpg", "jpeg", "png"],
         accept_multiple_files=True,
+        key=f"uploader_{st.session_state.uploader_key}",
     )
 
     # Process Uploaded Files
@@ -198,6 +202,7 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"{uf.name}: {e}")
 
+        st.session_state.uploader_key += 1  # Clears the file uploader widget
         st.rerun()
 
     st.divider()

@@ -31,6 +31,7 @@ class VectorStoreEngine:
         try:
             self.embeddings = FastEmbedEmbeddings(
                 model_name=embed_model,
+                cache_dir=os.path.expanduser("~/.cache/fastembed_models"),
             )
         except Exception as e:
             log.error("Failed to load local embeddings: %s", e)
