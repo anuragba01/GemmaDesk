@@ -10,3 +10,7 @@ __pycache__/
 .cache/
 archeive/
 chat_sessions/
+.pytest_cache/
+video_script.md
+kaggle_writeup.md
+abc.txt
