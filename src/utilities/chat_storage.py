@@ -55,7 +55,7 @@ def load_session(session_id: str) -> list:
     Loads the message history for a specific session from its JSONL file.
     
     Args:
-        session_id: The unique identifier for the session.
+        session_id (str): The unique identifier for the session.
         
     Returns:
         list: A list of message dictionaries (role, content, and id).
@@ -82,8 +82,8 @@ def save_session(session_id: str, messages: list):
     Injects sequential IDs (1, 2, 3...) into messages.
     
     Args:
-        session_id: The unique identifier for the session.
-        messages: The list of message dictionaries to persist.
+        session_id (str): The unique identifier for the session.
+        messages (list): The list of message dictionaries to persist.
     """
     _init_dir()
     if not messages:
