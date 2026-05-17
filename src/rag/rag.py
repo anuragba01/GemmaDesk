@@ -323,7 +323,10 @@ class MultimodalRAG:
         media_need = self._detect_media_need(question)
         skip_gateway = bool(explicit_times and target_media)
 
-        if not skip_gateway and not fetch_full and self.gateway.is_summary_request(question):
+        # Only trigger full-document fetch for text/PDF files.
+        # For video/audio, transcripts are long and fetch_full floods the context → very slow.
+        # Semantic search (k=4) works better and faster for media queries.
+        if not skip_gateway and not fetch_full and not target_media and self.gateway.is_summary_request(question):
             log.info("Gateway detected summary intent. Auto-enabling fetch_full mode.")
             fetch_full = True
 
@@ -333,7 +336,7 @@ class MultimodalRAG:
                 if skip_gateway and target_media:
                     docs = self._get_timestamp_context_docs(target_media, explicit_times)
                 elif fetch_full:
-                    docs = self.vector_store.get_all_chunks(filter_paths=text_paths, limit=30)
+                    docs = self.vector_store.get_all_chunks(filter_paths=text_paths, limit=10)
                 if not docs:
                     docs = self._retrieve_text_docs(question, filter_paths=text_paths)
             except Exception as e:
@@ -357,7 +360,7 @@ class MultimodalRAG:
                 "stream": audio_fallback_stream(),
                 "sources": [os.path.basename(p) for p in target_media if p.endswith((".mp3", ".wav"))],
             }
-        
+        clips_to_delete = []
         if explicit_times:
             if not target_media:
                 def error_stream():
@@ -376,6 +379,7 @@ class MultimodalRAG:
                         clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
                         if clips:
                             image_paths.extend(clips)
+                            clips_to_delete.extend(clips)
                             log.info("Extracted explicit support clips at %ss: %s", ts, clips)
                             break
                     if image_paths:
@@ -406,8 +410,20 @@ class MultimodalRAG:
             "image_paths": image_paths,
         })
         
+        def _cleanup_stream(gen):
+            try:
+                yield from gen
+            finally:
+                for path in clips_to_delete:
+                    if os.path.exists(path):
+                        try:
+                            os.unlink(path)
+                            log.info("Cleaned up temp clip: %s", path)
+                        except Exception as e:
+                            log.error("Failed to delete temp clip %s: %s", path, e)
+
         return {
-            "stream": stream,
+            "stream": _cleanup_stream(stream),
             "sources": self._source_names(docs, image_paths),
         }
 

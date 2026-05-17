@@ -35,11 +35,17 @@ class MediaEngine:
 
     def _get_whisper(self):
         if self._whisper is None:
-            log.info("Loading Faster-Whisper model (%s)...", self.whisper_model)
+            import sys
+            if getattr(sys, "frozen", False):
+                whisper_path = os.path.join(sys._MEIPASS, "model", "whisper-base")
+            else:
+                whisper_path = self.whisper_model
+
+            log.info("Loading Faster-Whisper model (%s) from path=%s...", self.whisper_model, whisper_path)
             try:
                 from faster_whisper import WhisperModel
                 # Using CPU and int8 for ultra-light inference
-                self._whisper = WhisperModel(self.whisper_model, device="cpu", compute_type="int8")
+                self._whisper = WhisperModel(whisper_path, device="cpu", compute_type="int8")
                 log.info("Faster-Whisper loaded.")
             except Exception as e:
                 log.error("Faster-Whisper load failed: %s", e)

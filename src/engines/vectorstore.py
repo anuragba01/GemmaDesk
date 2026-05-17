@@ -27,11 +27,17 @@ class VectorStoreEngine:
         """
         self.chroma_dir = chroma_dir
         
-        log.info("Loading FastEmbed embeddings (%s)...", embed_model)
+        import sys
+        if getattr(sys, "frozen", False):
+            cache_dir = os.path.join(sys._MEIPASS, "model", "fastembed_models")
+        else:
+            cache_dir = os.path.expanduser("~/.cache/fastembed_models")
+
+        log.info("Loading FastEmbed embeddings (%s) from cache_dir=%s...", embed_model, cache_dir)
         try:
             self.embeddings = FastEmbedEmbeddings(
                 model_name=embed_model,
-                cache_dir=os.path.expanduser("~/.cache/fastembed_models"),
+                cache_dir=cache_dir,
             )
         except Exception as e:
             log.error("Failed to load local embeddings: %s", e)
