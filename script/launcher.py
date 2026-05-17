@@ -77,6 +77,18 @@ def _resolve_runtime_paths() -> tuple[str, str]:
     return project_root, app_path
 
 
+def _resolve_writable_dir() -> str:
+    # If running inside an AppImage, use the directory of the AppImage itself or the OWD
+    if "APPIMAGE" in os.environ:
+        return os.path.dirname(os.environ["APPIMAGE"])
+    # If frozen but not AppImage (e.g. raw pyinstaller exe)
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    # If in development mode, use project root
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+
 def run_streamlit_server(app_path: str, port: int):
     """Directly runs the Streamlit server in this process."""
     import streamlit.web.cli as stcli
@@ -114,7 +126,8 @@ def start_streamlit(port: int):
     if not os.path.exists(app_path):
         raise FileNotFoundError(f"Streamlit entrypoint not found: {app_path}")
 
-    _append_log(f"Starting Streamlit with app_path={app_path} cwd={project_root} port={port}")
+    writable_dir = _resolve_writable_dir()
+    _append_log(f"Starting Streamlit with app_path={app_path} cwd={writable_dir} port={port}")
 
     if getattr(sys, "frozen", False):
         cmd = [sys.executable, "--internal-streamlit", app_path, str(port)]
@@ -125,7 +138,7 @@ def start_streamlit(port: int):
     process = subprocess.Popen(
         cmd,
         env=os.environ.copy(),
-        cwd=project_root,
+        cwd=writable_dir,
         stdout=log_handle,
         stderr=subprocess.STDOUT,
     )

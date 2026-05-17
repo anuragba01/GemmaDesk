@@ -45,7 +45,32 @@ log = logging.getLogger("gemmadesk.app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
-st.set_page_config(page_title="GemmaDesk", layout="wide")
+def resolve_asset_path(filename: str) -> str:
+    import sys
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, "asset", filename)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "asset", filename))
+
+logo_path = resolve_asset_path("gemmalogocrop.png")
+
+st.set_page_config(page_title="GemmaDesk", layout="wide", page_icon=logo_path)
+
+# Hide Streamlit's default toolbar (Stop, Deploy, 3-dot menu) for a clean UI
+st.markdown("""
+    <style>
+        /* Hide the entire top-right toolbar: Stop, Deploy, and ⋮ menu */
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        header[data-testid="stHeader"] {
+            visibility: hidden !important;
+            height: 0 !important;
+        }
+        /* Also hide the status widget (running indicator) */
+        [data-testid="stStatusWidget"] {
+            visibility: hidden !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 @st.cache_resource(show_spinner="Loading RAG engine...")
 def load_components():
@@ -117,16 +142,10 @@ if "pending_question" not in st.session_state:
 
 if "active_stream" not in st.session_state:
     st.session_state.active_stream = None
-elif st.session_state.active_stream is not None:
-    log.warning("Forcing cleanup of orphaned active_stream generator.")
-    try:
-        st.session_state.active_stream.close()
-    except Exception as e:
-        log.error("Failed to close active_stream: %s", e)
-    st.session_state.active_stream = None
 
 # --- Sidebar UI ---
 with st.sidebar:
+    st.image(logo_path, width=80)
     st.title("GemmaDesk")
     st.caption("Offline Multimodal Study Tool")
     st.divider()
@@ -188,7 +207,10 @@ with st.sidebar:
                 elif ext == ".mp4":
                     with st.spinner(f"Transcribing {uf.name}..."):
                         n = media_engine.ingest_video(tmp_path)
-                    st.success(f"{uf.name} → {n} transcript chunks")
+                    if n > 0:
+                        st.success(f"{uf.name} → {n} transcript chunks")
+                    else:
+                        st.warning(f"{uf.name} processed but no clear speech was found.")
 
                 elif ext in (".jpg", ".jpeg", ".png"):
                     with st.spinner(f"Indexing {uf.name}..."):
@@ -384,6 +406,9 @@ if question:
             try:
                 if len(selected_image_paths) > 10:
                     raise ValueError("Select up to 10 images at once.")
+                
+                if not selected_paths and not rag.get_stats()["text_chunks"] and not rag.get_stats()["images"]:
+                    st.info("No documents are currently indexed. I will answer based on my general knowledge.")
                 
                 # Call the RAG orchestrator for a streaming response
                 result = rag.query_stream(

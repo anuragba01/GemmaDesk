@@ -6,6 +6,12 @@ import time
 FASTEMBED_CACHE = os.path.expanduser("~/.cache/fastembed_models")
 GEMMA_MODEL_LABEL = "Gemma 4 LiteRT Model (3.5+ GB)"
 
+def resolve_asset_path(filename: str) -> str:
+    import sys
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, "asset", filename)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "asset", filename))
+
 def check_dependencies() -> list:
     """
     Checks if the heavy AI models have been downloaded to the local system.
@@ -14,20 +20,26 @@ def check_dependencies() -> list:
     missing = []
     
     # Check Gemma Model
-    gemma_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model", "gemma-4-E4B-it.litertlm"))
+    import sys
+    if getattr(sys, "frozen", False):
+        gemma_path = os.path.abspath(os.path.join("model", "gemma-4-E4B-it.litertlm"))
+    else:
+        gemma_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model", "gemma-4-E4B-it.litertlm"))
     if not os.path.exists(gemma_path):
         missing.append(GEMMA_MODEL_LABEL)
         
-    # Check FastEmbed Embedding Model — uses permanent cache dir
-    # fastembed saves as: <cache_dir>/models--qdrant--bge-small-en-v1.5-onnx-q
-    bge_model_dir = os.path.join(FASTEMBED_CACHE, "models--qdrant--bge-small-en-v1.5-onnx-q")
-    if not os.path.exists(bge_model_dir):
-        missing.append("BGE Embedding Model (130 MB)")
-        
-    # Check Faster-Whisper
-    whisper_cache = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")
-    if not os.path.exists(whisper_cache):
-        missing.append("Whisper Base Model (140 MB)")
+    # If the app is compiled (frozen), the embedding and whisper models are baked into the AppImage.
+    if not getattr(sys, "frozen", False):
+        # Check FastEmbed Embedding Model — uses permanent cache dir
+        # fastembed saves as: <cache_dir>/models--qdrant--bge-small-en-v1.5-onnx-q
+        bge_model_dir = os.path.join(FASTEMBED_CACHE, "models--qdrant--bge-small-en-v1.5-onnx-q")
+        if not os.path.exists(bge_model_dir):
+            missing.append("BGE Embedding Model (130 MB)")
+            
+        # Check Faster-Whisper
+        whisper_cache = os.path.expanduser("~/.cache/huggingface/hub/models--Systran--faster-whisper-base")
+        if not os.path.exists(whisper_cache):
+            missing.append("Whisper Base Model (140 MB)")
         
     return missing
 
@@ -35,8 +47,21 @@ def render_setup_page(missing_deps: list):
     """
     Renders a landing page that prompts the user to download missing dependencies.
     """
-    st.set_page_config(page_title="GemmaDesk Setup", layout="centered")
+    # Hide Streamlit toolbar (Stop/Deploy/⋮) on the setup page too
+    st.markdown("""
+        <style>
+            [data-testid="stToolbar"],
+            [data-testid="stDecoration"],
+            header[data-testid="stHeader"],
+            [data-testid="stStatusWidget"] {
+                visibility: hidden !important;
+                height: 0 !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
     
+    logo_path = resolve_asset_path("gemmalogocrop.png")
+    st.image(logo_path, width=120)
     st.title("Welcome to GemmaDesk")
     st.markdown("Before we can start your offline, multimodal RAG experience, we need to download the core AI models to your local machine.")
     
@@ -58,7 +83,11 @@ def render_setup_page(missing_deps: list):
                 if GEMMA_MODEL_LABEL in missing_deps:
                     st.write("Downloading Gemma 4 LiteRT... (This may take a while)")
                     from huggingface_hub import hf_hub_download
-                    model_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model"))
+                    import sys
+                    if getattr(sys, "frozen", False):
+                        model_dir = os.path.abspath("model")
+                    else:
+                        model_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model"))
                     os.makedirs(model_dir, exist_ok=True)
                     hf_hub_download(
                         repo_id="litert-community/gemma-4-E4B-it-litert-lm",
