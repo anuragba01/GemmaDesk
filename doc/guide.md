@@ -36,8 +36,6 @@ Windows activation:
 .venv\Scripts\activate
 ```
 
-> [!NOTE]
-> **No system ffmpeg install required:** GemmaDesk uses `imageio-ffmpeg`, which provides the ffmpeg binary used for media extraction and duration probing.
 
 ## 2. Automated Model Setup
 
@@ -67,16 +65,6 @@ python3 script/launcher.py
 uv run streamlit run app/app.py
 ```
 
-## 4. Current Media Behavior
-
-GemmaDesk does not default to heavy multimodal video processing for every media question.
-
-Current behavior:
-1. Audio and video are transcribed locally.
-2. Timestamped media questions are answered from transcript text first.
-3. Exact media duration is checked before any clip extraction.
-4. Support clips are extracted only when the question explicitly asks about visuals or sound.
-5. Music-only or unreliable audio transcripts are rejected or treated as untrusted.
 
 ## 5. Chat Memory Behavior
 
