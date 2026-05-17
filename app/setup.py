@@ -4,6 +4,7 @@ import time
 
 # Use a permanent cache dir — fastembed defaults to /tmp which is wiped on reboot
 FASTEMBED_CACHE = os.path.expanduser("~/.cache/fastembed_models")
+GEMMA_MODEL_LABEL = "Gemma 4 LiteRT Model (3.5+ GB)"
 
 def check_dependencies() -> list:
     """
@@ -15,7 +16,7 @@ def check_dependencies() -> list:
     # Check Gemma Model
     gemma_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model", "gemma-4-E4B-it.litertlm"))
     if not os.path.exists(gemma_path):
-        missing.append("Gemma 4 LiteRT Model (3.5+ GB)")
+        missing.append(GEMMA_MODEL_LABEL)
         
     # Check FastEmbed Embedding Model — uses permanent cache dir
     # fastembed saves as: <cache_dir>/models--qdrant--bge-small-en-v1.5-onnx-q
@@ -54,7 +55,7 @@ def render_setup_page(missing_deps: list):
     if st.button("Download Missing Models", type="primary"):
         with st.status("Downloading AI Models...", expanded=True) as status:
             try:
-                if "Gemma 4 LiteRT Model (2.5 GB)" in missing_deps:
+                if GEMMA_MODEL_LABEL in missing_deps:
                     st.write("Downloading Gemma 4 LiteRT... (This may take a while)")
                     from huggingface_hub import hf_hub_download
                     model_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "model"))

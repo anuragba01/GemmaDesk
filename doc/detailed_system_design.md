@@ -1,113 +1,139 @@
 # GemmaDesk: Detailed System Design
 
-This document details the architecture and implementation of the GemmaDesk system, mapped directly against the LLD checklist provided.
+This document describes the current GemmaDesk architecture as implemented in the codebase.
 
 ## 1. Requirements
-*   **[x] Functional requirements (user facing)**: A multimodal RAG study assistant allowing users to upload documents (PDF, TXT) and media (Audio, Video, Images). Users can chat with the AI, ask questions, request summaries, and filter context by specific files. Includes a persistent chat history and a user profile personalization system.
-*   **[x] Functional requirements (system/internal)**: The system must ingest various file types, chunk text, transcribe audio/video, classify document difficulty, and route queries between standard semantic search and full-document bypass based on user intent.
-*   **[x] Non-functional requirements**: Local-only execution (offline), responsive UI (Streamlit streaming), persistent state across reboots.
-*   **[x] AI-specific requirements**: High hallucination tolerance (strict grounding instructions in prompt), offline execution using local models.
-*   **[x] Constraints**: Must run on consumer hardware. Uses `LiteRT` for the LLM to manage memory and performance, falling back to CPU if GPU is unavailable.
-*   **[x] Single user or multi-user**: Single-user desktop application.
-*   **[x] Real-time or batch processing**: Real-time chat inference; synchronous/sequential batch processing for document ingestion.
+*   **[x] Functional requirements (user facing)**: Offline multimodal study assistant supporting PDF, TXT, MP3, WAV, MP4, JPG, JPEG, and PNG uploads. Users can chat with the assistant, ask source-filtered questions, request summaries, inspect media timestamps, and maintain persistent chat sessions.
+*   **[x] Functional requirements (system/internal)**: The system must ingest and chunk text, transcribe audio/video, store image references, classify document hardness, route summary requests to a full-content retrieval path, support timestamp-aware media questions, and preserve long-term chat memory.
+*   **[x] Non-functional requirements**: Entirely local execution, persistent storage on disk, streaming UI responses, and operation on consumer hardware.
+*   **[x] AI-specific requirements**: Responses must stay grounded in retrieved local context; multimodal inference must only attach media when necessary; non-speech audio should not be treated as reliable transcript text.
+*   **[x] Constraints**: Single-user desktop app, offline, using LiteRT for inference and local embedding/vector storage.
+*   **[x] Single user or multi-user**: Single-user Streamlit desktop workflow.
+*   **[x] Real-time or batch processing**: Real-time query answering; synchronous file ingestion; background chat-memory indexing every 8 messages.
 
 ## 2. Data Pipeline
-*   **[x] Data sources identified**: Local filesystem uploads via Streamlit (`PDF`, `TXT`, `MP3`, `WAV`, `MP4`, `JPG`, `PNG`).
+*   **[x] Data sources identified**: Local filesystem uploads through Streamlit.
 *   **[x] Ingestion strategy per data type**:
-    *   **Text/PDF**: Direct load and split via `DocumentEngine`.
-    *   **Audio/Video**: Transcribed via `MediaEngine` using Whisper (`base` model). Videos have audio extracted via `ffmpeg` before transcription.
-    *   **Images**: Copied to a local `uploaded_images` directory and tracked in `image_manifest.json` by `VisionEngine`.
-*   **[x] Preprocessing steps**: Audio extraction from video. Text sampling to determine "hardness" using the Gemma LLM.
-*   **[x] Chunking strategy**: `RecursiveCharacterTextSplitter` (Size: 500 characters, Overlap: 50 characters).
+    *   **PDF/TXT**: Loaded by `DocumentEngine`, split into chunks, hardness-labeled once, then indexed into ChromaDB.
+    *   **Audio**: Transcribed by `MediaEngine` with `faster-whisper` (`base`, CPU, int8) using `vad_filter=True` and no domain-specific initial prompt. Transcript segments become timestamped documents.
+    *   **Video**: Converted to mono 16 kHz WAV via bundled `ffmpeg`, then transcribed exactly like audio. Timestamped transcript chunks are indexed as `type=video`.
+    *   **Images**: Copied into `uploaded_images` and tracked in `image_manifest.json` by `VisionEngine`. Images are not embedded.
+    *   **Chat history**: Every 8 messages, `ChatHistoryIngestion` formats the latest block and embeds it into ChromaDB as `type=chat` with `session_id` metadata.
+*   **[x] Preprocessing steps**:
+    *   Recursive text chunking for documents.
+    *   Hardness classification (`EASY`, `MEDIUM`, `HARD`) on a sampled document chunk.
+    *   Audio extraction for video.
+    *   Transcript reliability validation for audio/video before indexing.
+*   **[x] Chunking strategy**: `RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)` for document-like text. Whisper transcript segments are stored directly as individual timestamped units before later chunking/indexing.
 *   **[x] Metadata schema**:
-    *   `source`: Absolute file path.
-    *   `hardness`: EASY/MEDIUM/HARD.
-    *   `type`: audio/video (for media).
-    *   `timestamp`: Start time in seconds (for media).
-    *   `page`: Page number (for PDFs).
-*   **[x] File type detection and routing logic**: Managed in `app.py` based on file extensions.
-*   **[x] Error handling**: Try/except blocks around ffmpeg execution and ChromaDB insertion.
-*   **[x] Pipeline is idempotent**: `VisionEngine` prevents duplicate image copies. ChromaDB ingestion does not currently deduplicate chunks if the same text file is uploaded twice.
+    *   `source`: Original file path or chat session path.
+    *   `hardness`: `EASY` / `MEDIUM` / `HARD` for indexed text/transcript chunks.
+    *   `type`: `audio`, `video`, `chat`, or document-derived types.
+    *   `timestamp`: Start time in seconds for media transcript chunks.
+    *   `session_id`: Chat-session UUID for long-term memory blocks.
+    *   `block`: Chat block number.
+    *   `id_range`: Message ID range covered by a chat memory block.
+*   **[x] File type detection and routing logic**: Handled in `app/app.py` from extension-based routing.
+*   **[x] Error handling**: ffmpeg failures, Chroma failures, and transcription failures are wrapped with logging and surfaced to the UI.
+*   **[x] Pipeline idempotency**:
+    *   `VisionEngine` prevents duplicate image registration.
+    *   Chroma text ingestion does not fully deduplicate repeated uploads.
+    *   Invalid media transcripts are rejected before indexing.
 
 ## 3. Embedding Design
-*   **[x] Embedding model**: `nomic-ai/nomic-embed-text-v1.5` loaded locally via `HuggingFaceEmbeddings`.
-*   **[x] Embedding dimensions**: 768 (native to Nomic v1.5).
-*   **[x] Distance metric**: L2 (ChromaDB default).
-*   **[x] Separate embedding strategy**: Text and Transcripts are embedded. Images are NOT embedded; they are passed directly to the multimodal LLM via file paths.
-*   **[x] Re-embedding strategy**: A `Clear All Indexed Data` UI button allows the user to wipe ChromaDB and re-index if the model changes.
+*   **[x] Embedding model**: `BAAI/bge-small-en-v1.5` via `langchain_community.embeddings.fastembed.FastEmbedEmbeddings`.
+*   **[x] Embedding dimensions**: Model-native dimensions for BGE small (handled by FastEmbed runtime).
+*   **[x] Distance metric**: Chroma default similarity strategy.
+*   **[x] Separate embedding strategy**: Documents, media transcripts, and chat memory blocks are embedded. Images are passed directly to Gemma 4 and are never embedded.
+*   **[x] Query prefixing**: Retrieval prepends `search_query: ` to semantic queries to align with embedding model expectations.
+*   **[x] Re-embedding strategy**: `Clear All Indexed Data` clears Chroma and the image manifest so data can be reprocessed from scratch.
 
 ## 4. Vector Storage
-*   **[x] Vector DB**: ChromaDB (`chroma_db` directory) chosen for its simplicity and local persistence.
+*   **[x] Vector DB**: ChromaDB persisted in `./chroma_db`.
 *   **[x] Collection structure**: Single collection named `text_docs`.
-*   **[x] Metadata fields defined**: Stored inside Chroma's `metadatas` mapping (source, hardness, type, timestamp).
-*   **[x] Indexing strategy**: HNSW (ChromaDB default).
-*   **[x] Session/user isolation strategy**: N/A (Single user system).
-*   **[x] Persistence and backup strategy**: Persistent local directory. No automated cloud backups.
-*   **[x] Separate collections for different modalities**: No, all text (documents + transcripts) shares the `text_docs` collection. Images are managed entirely outside the vector DB.
+*   **[x] Metadata fields defined**: `source`, `hardness`, `type`, `timestamp`, `session_id`, `block`, `id_range`.
+*   **[x] Indexing strategy**: Default Chroma local indexing.
+*   **[x] Session/user isolation strategy**: Single-user application; chat memory retrieval is isolated by `session_id`.
+*   **[x] Persistence and backup strategy**: Local directories and JSONL files on disk; no automatic remote backup.
+*   **[x] Separate collections for modalities**: No. Searchable text for documents, transcripts, and chat memory shares one collection. Images remain external.
 
 ## 5. Retrieval Design
-*   **[x] top-k value**: `k=4` chunks for standard semantic search.
-*   **[x] Similarity threshold**: Not explicitly defined; relies on top-k sorting.
-*   **[x] Metadata filtering strategy**: UI allows filtering by `source` filename, which translates to a `$in` filter in ChromaDB.
-*   **[x] Hybrid search**: Not implemented. Pure semantic search.
-*   **[x] Query rewriting/expansion**: Prefix `search_query: ` is automatically prepended to user queries to satisfy Nomic embedding requirements.
-*   **[x] Retrieval quality measurable**: Logs track the number of chunks retrieved, but quantitative eval metrics (precision/recall) are not implemented.
+*   **[x] top-k value**: `k=4` for normal semantic retrieval.
+*   **[x] Similarity threshold**: None explicitly configured; ranked top-k retrieval is used.
+*   **[x] Metadata filtering strategy**: User-selected sources are converted to `source` filters (`=` or `$in`) in Chroma.
+*   **[x] Hybrid search**: Not implemented. Retrieval is semantic plus explicit metadata filters.
+*   **[x] Query rewriting/expansion**: No multi-step rewrite pipeline. Only embedding prefixing is applied.
+*   **[x] Retrieval quality measurable**: Retrieval counts are logged, but there is no formal offline eval suite yet.
+*   **[x] Timestamp-aware retrieval**: For explicit media timestamps, GemmaDesk first fetches transcript chunks for the selected media and chooses the nearest timestamped segments before considering multimodal support clips.
 
 ## 6. Prompt Design
-*   **[x] Prompt template defined**: Yes, in `src/rag/prompts.py`.
-*   **[x] Component order**: System Profile -> System Prompt -> History -> Context Blocks -> Images -> Query.
-*   **[x] System prompt finalized**: `CORE_SYSTEM_PROMPT` enforces strict grounding.
-*   **[x] Prompt versioned**: No explicit versioning system.
-*   **[x] Output format instructed**: Plain text/markdown expected. Citations forced into `[Source: filename]` format.
+*   **[x] Prompt template defined**: `src/rag/prompts.py`.
+*   **[x] Component order**: Optional user profile -> core system prompt -> optional confusion modifier -> retrieved context blocks -> optional image list -> user question.
+*   **[x] System prompt finalized**: `CORE_SYSTEM_PROMPT` instructs strict grounding and source citation.
+*   **[x] Prompt versioned**: No formal prompt versioning system.
+*   **[x] Output format instructed**: Plain text/Markdown with `[Source: filename]` citations.
+*   **[x] Media metadata injection**: When media files are selected, exact media durations are injected into the system prompt as factual metadata.
 
 ## 7. Context Window Management
-*   **[x] Max token limit**: Handled opaquely by the underlying `LiteRT` engine.
-*   **[x] Trimming priority order**: No active token trimming in Python layer. The entire chat history is passed to the engine.
-*   **[x] What gets dropped first**: N/A.
-*   **[x] Specific rules**: If images are passed in the current query, older assistant text responses in the history are excluded to prevent visual anchoring issues (`gemma.py` line 35).
+*   **[x] Max token limit**: Managed by LiteRT; Python code does not do token counting.
+*   **[x] Trimming priority order**: No explicit token trimming. The app limits live history passed to the model to the last 8 prior messages in Streamlit and supplements older context via retrieved chat-memory blocks.
+*   **[x] What gets dropped first**: Older direct chat turns are omitted from prompt history outside the short-term window; long-term memory retrieval reintroduces only relevant prior blocks.
+*   **[x] Specific rules**: If media is attached on the current turn, older assistant messages are skipped when replaying history to avoid stale multimodal anchoring in LiteRT.
 
 ## 8. Model / Inference
-*   **[x] Model chosen**: Gemma 4 E4B (`gemma-4-E4B-it.litertlm`) for its multimodal capabilities and local efficiency.
-*   **[x] Quantization strategy**: Pre-quantized `.litertlm` format used.
-*   **[x] Runtime**: `LiteRT` via the Python `litert_lm` bindings.
-*   **[x] Hardware target**: CPU/GPU. Attempts to initialize vision backend on GPU; falls back entirely to CPU if GPU is unavailable.
-*   **[x] Model loading strategy**: Loaded once and cached in memory using Streamlit's `@st.cache_resource`.
-*   **[x] Streaming response supported**: Yes, via `engine.create_conversation().send_message_async()` yielding chunks.
+*   **[x] Model chosen**: `gemma-4-E4B-it.litertlm`.
+*   **[x] Quantization strategy**: Pre-quantized LiteRT model artifact.
+*   **[x] Runtime**: `litert_lm` Python bindings.
+*   **[x] Hardware target**: CPU for audio backend; GPU preferred for vision backend with full CPU fallback if unavailable.
+*   **[x] Model loading strategy**: Cached once with Streamlit `@st.cache_resource` in `load_components()`.
+*   **[x] Streaming response supported**: Yes, via `send_message_async()` and Streamlit `write_stream()`.
+*   **[x] Multimodal invocation strategy**: Most queries remain text-first. Audio/image support clips are only attached when explicitly needed, especially for visual/audio-focused timestamp questions.
 
 ## 9. Memory & Session Management
-*   **[x] Session storage design**: JSON files.
-*   **[x] Schema defined**: Each session is a JSON file in `./chat_sessions` containing `id`, `title`, `timestamp`, and an array of `messages`.
-*   **[x] Chat history retrieval strategy**: Loads the full JSON array and injects it into the LiteRT conversation object before the new query.
-*   **[x] Session cleanup/expiry strategy**: No automatic cleanup. User profile preferences (language, education) are stored separately in `user_profile.json`.
+*   **[x] Session storage design**: JSONL files in `./chat_sessions`.
+*   **[x] Schema defined**: First line contains metadata (`type`, `id`, `title`, `timestamp`); following lines contain individual messages with sequential `id` fields.
+*   **[x] Chat history retrieval strategy**: The UI keeps the current session in `st.session_state`. For inference, the app passes only the most recent message window directly and retrieves older relevant blocks from Chroma by `session_id`.
+*   **[x] Session cleanup/expiry strategy**: No automatic deletion. New conversation resets the active `session_id`.
+*   **[x] User profile persistence**: Stored locally in `user_profile.json`.
 
 ## 10. Evaluation & Quality
-*   **[x] Intent classification**: `IntentGateway` (uses cosine similarity against predefined phrase clusters) to detect "Summary" or "Confusion" intents.
-*   **[x] Hallucination detection strategy**: Mitigated via strict prompt instructions, not algorithmically detected post-generation.
-*   (Formal evaluation datasets, baselines, and regression testing are not currently implemented).
+*   **[x] Intent classification**: `IntentGateway` uses keyword-first rules for summary/confusion detection, with embedding similarity fallback for ambiguous cases.
+*   **[x] Hallucination mitigation**:
+    *   Strict grounding prompt.
+    *   Source filtering by selected files.
+    *   Transcript-first media QA.
+    *   Exact media duration validation.
+    *   Rejection of unreliable audio/video transcripts.
+    *   Refusal to answer from suspicious already-indexed audio transcripts.
+*   **[x] Formal evaluation**: No benchmark dataset or regression suite is implemented yet.
 
 ## 11. Scalability
-*   **[x] Concurrent user handling**: Single-user architecture via Streamlit local server.
-*   **[x] Embedding pipeline scalable**: Sequential processing.
-*   **[x] Vector DB scalable**: Local SQLite-backed ChromaDB.
-*   **[x] Model inference scalable**: Synchronous single-threaded LiteRT execution.
+*   **[x] Concurrent user handling**: Not a goal; single-user local architecture.
+*   **[x] Embedding pipeline scalable**: Sequential and local; optimized for small personal corpora.
+*   **[x] Vector DB scalable**: Limited by local Chroma/SQLite constraints.
+*   **[x] Model inference scalable**: Single-process local inference tuned for responsiveness over throughput.
 
 ## 12. Reliability
-*   **[x] Fallback if retrieval returns nothing**: Prompt template dynamically injects *"No relevant text chunks found"* if retrieval is empty, allowing the LLM to gracefully state it lacks context.
-*   **[x] Graceful degradation**: LiteRT automatically falls back to CPU if the GPU fails to initialize.
-*   **[x] Data backup strategy**: All data (Chroma, Images, Chats) is written to standard local directories, making manual backup easy.
+*   **[x] Fallback if retrieval returns nothing**: Prompt injects `No relevant text chunks found.` when no context exists.
+*   **[x] Graceful degradation**:
+    *   LiteRT falls back to CPU if GPU vision init fails.
+    *   Out-of-range timestamp questions are rejected before expensive media extraction.
+    *   Non-speech or unreliable audio is reported honestly instead of being hallucinated into transcript text.
+*   **[x] Data backup strategy**: All persistent state is local and file-based (`chroma_db`, `uploaded_images`, `uploaded_media`, `chat_sessions`, `user_profile.json`).
 
 ## 13. Security & Privacy
-*   **[x] User data isolation**: Local-first app. Data remains on the user's hard drive.
-*   **[x] Uploaded files stored securely**: Files are copied to `uploaded_images` or embedded into Chroma locally.
-*   **[x] PII handling**: No external network calls are made for embeddings or inference, inherently protecting PII.
+*   **[x] User data isolation**: Local-first design; no inference or embedding network calls in normal operation after setup models are downloaded.
+*   **[x] Uploaded files stored securely**: Uploaded media is written to local directories under the workspace.
+*   **[x] PII handling**: Since all retrieval, embedding, and generation stay on-device, sensitive study materials never need to leave the machine.
 
 ## 14. Monitoring & Observability
-*   **[x] Logging**: standard Python `logging` used across all engines (`rag.vectorstore`, `rag.media`, `rag.orchestrator`, etc.).
-*   **[x] Retrieval tracked**: Logs indicate when a query bypasses semantic search for full-document retrieval (summary intent).
-*   **[x] Fallback logging**: Logs when the GPU backend fails and falls back to CPU.
+*   **[x] Logging**: Python `logging` used across ingestion, retrieval, and inference modules.
+*   **[x] Retrieval tracked**: Logs cover retrieval failures, full-content bypass usage, chat-memory retrieval, and timestamp context selection.
+*   **[x] Fallback logging**: Logs include GPU fallback, invalid media extraction, rejected unreliable transcripts, and forced cleanup of orphaned active streams.
 
 ## 15. Trade-offs Documented
-*   **[x] Media Handling**: Chose to transcribe Video/Audio to text and embed the text, rather than using a multimodal embedding space (like ImageBind). This is faster and uses less VRAM locally.
-*   **[x] Video Visuals**: Instead of processing every frame of a video, the system extracts a single keyframe and an audio snippet around the exact timestamp of a retrieved text chunk to save inference time.
-*   **[x] Session Storage**: Opted for JSON files over a formal SQL database for chat history to keep the architecture portable and file-system based.
-*   **[x] Vector Search**: Semantic search is limited to `k=4`. To handle requests for "summaries" that require more context, the system completely bypasses semantic search and dumps up to 30 chunks of a document directly into the prompt (Full-Content Bypass). This trades context window size for guaranteed recall on summarization tasks.
+*   **[x] Text-first media QA**: GemmaDesk prefers transcript-grounded answers and only escalates to multimodal clips when the question explicitly demands visual/audio evidence. This is much faster and more stable than default clip extraction on every video query.
+*   **[x] No multimodal embedding space**: Media is converted into transcript text plus optional support clips, rather than building a unified multimodal retrieval index.
+*   **[x] Full-content bypass for summaries**: Summary-style queries trade prompt size for recall by loading up to 30 chunks directly.
+*   **[x] File-system persistence over service infrastructure**: JSONL, manifests, and local Chroma make the app portable and inspectable, at the cost of stronger concurrency guarantees.
+*   **[x] Transcript rejection over aggressive recall**: The system would rather refuse to answer from unreliable audio than index and retrieve likely hallucinations.

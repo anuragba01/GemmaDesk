@@ -6,7 +6,6 @@ raw text and PDF files, splitting them into manageable chunks, and using the
 Gemma model to classify the difficulty ("hardness") of the content before 
 sending it to the VectorStore for indexing.
 """
-import os
 import logging
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter

@@ -1,64 +1,92 @@
 # GemmaDesk Developer Guide
 
-Welcome to the GemmaDesk project! This guide will help you set up and run the local Offline Multimodal RAG study tool.
+This guide explains how to set up and run GemmaDesk locally.
 
 ## Architecture Overview
-GemmaDesk is a **unified, local-first application**. Unlike traditional RAG pipelines that rely on cloud APIs or separate heavy servers, GemmaDesk runs entirely in a single process:
+GemmaDesk is a local-first multimodal RAG desktop app built around a single Streamlit process with cached local models.
 
-1. **Frontend / UI:** Built with Streamlit, handling file uploads and conversation history.
-2. **Unified RAG Engine:** A single Python backend that coordinates:
-   - **LiteRT (Gemma 4):** Our lightweight LLM loaded directly into the app memory.
-   - **ChromaDB:** Local vector storage for documents, videos, and chat history.
-   - **Multi-Engine Pipeline:** Dedicated handlers for PDF parsing, video clipping (FFmpeg), and image vision.
+Core runtime pieces:
+1. **Streamlit UI**: File upload, source selection, learner profile, session history, and streaming chat output.
+2. **Local retrieval stack**:
+   - **Gemma 4 via LiteRT** for answer generation
+   - **ChromaDB** for local vector storage
+   - **FastEmbed / BGE small** for embeddings
+   - **Faster-Whisper** for audio/video transcription
+   - **imageio-ffmpeg** for bundled ffmpeg-based media processing
+3. **Orchestration layer**:
+   - transcript-first media QA
+   - exact media-duration validation
+   - summary bypass for whole-document requests
+   - long-term chat-memory retrieval
+   - multimodal attachment only when needed
 
 ## 1. Setup & Installation
 
-GemmaDesk manages almost all dependencies automatically via Python. Ensure you have `uv` installed, then install all project dependencies:
+Create a virtual environment and install dependencies:
 
 ```bash
-# 1. Create a virtual environment
 uv venv
-
-# 2. Activate the environment
-# On Linux/macOS:
 source .venv/bin/activate
-# On Windows:
-.venv\Scripts\activate
-
-# 3. Install dependencies
 uv pip install -r requirements.txt
 ```
 
-> [!NOTE]  
-> **No System FFmpeg Required:** We use `imageio-ffmpeg`, which automatically downloads a portable FFmpeg binary into your virtual environment. You do NOT need to run `sudo apt install`.
+Windows activation:
+
+```bash
+.venv\Scripts\activate
+```
+
+> [!NOTE]
+> **No system ffmpeg install required:** GemmaDesk uses `imageio-ffmpeg`, which provides the ffmpeg binary used for media extraction and duration probing.
 
 ## 2. Automated Model Setup
 
-The first time you run GemmaDesk, it will detect if you are missing the required AI models (Gemma 4, Nomic Embeddings, and Whisper). 
+On first launch, GemmaDesk checks for three local model dependencies:
+1. Gemma 4 LiteRT model
+2. BGE embedding model cache
+3. Faster-Whisper base model
 
-1. Launch the application (see below).
-2. The UI will redirect you to a **Setup Screen**.
-3. Click **"Download Missing Models"**.
-4. The app will automatically pull ~3.2GB of models from HuggingFace and cache them locally. 
-5. Once finished, the app will auto-refresh into the Chat Interface.
+If any are missing:
+1. Launch the app.
+2. You will see the setup screen.
+3. Click **Download Missing Models**.
+4. The app downloads and caches the required models locally.
+5. When setup finishes, the UI reloads into the main chat interface.
 
 ## 3. Running the Application
 
-There are two ways to run GemmaDesk:
+### A. Desktop Mode
 
-### A. Desktop Mode (Recommended)
-To run GemmaDesk as a standalone native desktop window:
 ```bash
 python3 script/launcher.py
 ```
 
 ### B. Developer Mode
-To run it in your default web browser:
+
 ```bash
 uv run streamlit run app/app.py
 ```
 
+## 4. Current Media Behavior
+
+GemmaDesk does not default to heavy multimodal video processing for every media question.
+
+Current behavior:
+1. Audio and video are transcribed locally.
+2. Timestamped media questions are answered from transcript text first.
+3. Exact media duration is checked before any clip extraction.
+4. Support clips are extracted only when the question explicitly asks about visuals or sound.
+5. Music-only or unreliable audio transcripts are rejected or treated as untrusted.
+
+## 5. Chat Memory Behavior
+
+GemmaDesk uses two layers of memory:
+1. **Short-term memory**: recent conversation passed directly in the active prompt.
+2. **Long-term memory**: every 8 messages, the latest chat block is embedded into ChromaDB and can be retrieved later by `session_id`.
+
 ## Troubleshooting
-- **Slow First Load:** Loading the 2.5GB model into memory takes ~15-20 seconds on the first run of a session. Subsequent chats are near-instant.
-- **GPU Acceleration:** By default, GemmaDesk tries to use your GPU for vision tasks. If it fails, it will automatically fallback to CPU mode (check terminal logs for "CPU fallback").
-- **Missing Directory:** Ensure you have write permissions in the project root so the app can create the `model/`, `chroma_db/`, and `uploaded_media/` folders.
+
+- **Slow first load:** Initial model loading can take time because Gemma 4, embeddings, and Whisper are loaded locally.
+- **GPU fallback:** GemmaDesk attempts GPU-backed vision inference first. If it fails, LiteRT falls back to CPU automatically.
+- **Unreliable audio answers:** If an audio file contains music, noise, or weak speech, GemmaDesk may refuse to answer from it rather than hallucinate a transcript.
+- **Missing directory errors:** Ensure the project root is writable so the app can create `model/`, `chroma_db/`, `uploaded_media/`, `uploaded_images/`, and `chat_sessions/`.

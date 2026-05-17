@@ -1,43 +1,52 @@
 # GemmaDesk File Structure & Functions
 
-This document describes the role of each file and directory in the GemmaDesk project.
+This document summarizes the current role of the main files and directories in GemmaDesk.
 
 ## Core Application
-- **`app/app.py`**: The main entry point. A Streamlit-based web interface that handles the UI, file uploads, and user chat interactions.
-- **`app/setup.py`**: The **Dependency Manager**. Handles pre-flight checks and the automated model downloader UI.
-- **`app/__init__.py`**: Makes the `app` folder a Python package.
+- **`app/app.py`**: Main Streamlit entry point. Handles setup gating, profile collection, file uploads, source filters, chat UI, and streaming responses.
+- **`app/setup.py`**: Preflight dependency and model setup screen. Checks for Gemma 4, BGE embeddings, and Whisper, then offers one-click downloads.
+- **`app/__init__.py`**: Makes `app` importable as a package.
 
 ## Source Code (`src/`)
-The core logic is modularized into specialized engines and utilities.
 
 ### RAG Orchestration
-- **`src/rag/rag.py`**: The orchestrator (Facade pattern). Routes tasks to specialized engines and manages the "Temporal Bypass" logic for video clipping.
-- **`src/rag/gemma.py`**: The LiteRT integration engine. Loads the Gemma model directly into the app process.
-- **`src/rag/__init__.py`**: Python package initializer.
+- **`src/rag/rag.py`**: Main orchestration layer. Handles retrieval, source filtering, transcript-first media QA, timestamp validation, summary bypass, chat-memory retrieval, and prompt assembly.
+- **`src/rag/gemma.py`**: LiteRT integration layer. Loads the Gemma model locally and provides synchronous and streaming multimodal inference.
+- **`src/rag/gateway.py`**: Intent gateway for summary/confusion routing using keyword-first checks with embedding fallback.
+- **`src/rag/prompts.py`**: Central prompt and template definitions.
+- **`src/rag/__init__.py`**: Package initializer.
 
 ### Processing Engines
-- **`src/engines/document.py`**: Handles text and PDF files. Manages chunking and ChromaDB operations.
-- **`src/engines/media.py`**: Handles audio and video. Uses Whisper for transcription and **portable `imageio-ffmpeg`** for frame extraction.
-- **`src/engines/vision.py`**: Manages image file tracking and registry.
-- **`src/engines/__init__.py`**: Python package initializer.
+- **`src/engines/document.py`**: Loads PDFs/TXT files, splits text into chunks, performs hardness classification, and forwards chunks for indexing.
+- **`src/engines/media.py`**: Handles audio/video ingestion, exact media-duration probing, transcript reliability checks, and targeted support clip extraction through `imageio-ffmpeg`.
+- **`src/engines/vectorstore.py`**: Wraps local ChromaDB access, semantic retrieval, full-content bypass retrieval, chat-memory retrieval, and source-map generation.
+- **`src/engines/vision.py`**: Tracks uploaded images in a manifest and serves them as direct multimodal inputs.
+- **`src/engines/chat_ingestion.py`**: Converts every completed 8-message chat block into long-term vector memory in ChromaDB.
+- **`src/engines/__init__.py`**: Package initializer.
 
 ### Utilities
-- **`src/utilities/chat_storage.py`**: Manages persistent chat sessions via JSON files.
-- **`src/utilities/__init__.py`**: Python package initializer.
+- **`src/utilities/chat_storage.py`**: Persists conversations as JSONL files and manages session metadata.
+- **`src/utilities/profile.py`**: Stores and loads the local learner profile.
+- **`src/utilities/__init__.py`**: Package initializer.
 
-## Web & Deployment
-- **`web/`**: Contains the premium, off-white landing page (`index.html`, `style.css`, `script.js`).
-- **`script/launcher.py`**: The **Native Desktop Launcher**. Wraps the app in a `pywebview` window.
-- **`script/download_model.py`**: Legacy CLI utility for downloading models.
+## Launch & Supporting Scripts
+- **`script/launcher.py`**: Native desktop launcher using `pywebview`.
+- **`script/download_model.py`**: Older standalone helper for model download workflows.
 
-## Testing & Docs
-- **`tests/`**: Contains the **Pytest suite** (`test_rag.py`, `test_media.py`, `test_vectorstore.py`).
-- **`doc/guide.md`**: The setup guide and running instructions.
-- **`doc/detailed_system_design.md`**: In-depth architectural documentation.
-- **`requirements.txt`**: List of all Python libraries, including portable FFmpeg.
+## Documentation
+- **`doc/guide.md`**: Developer setup and run guide.
+- **`doc/detailed_system_design.md`**: Current system architecture and design notes.
+- **`doc/file.md`**: This file map.
+- **`whiteups.txt`**: High-level product and engineering writeup.
 
-## Data & Assets
-- **`model/`**: Stores the heavy LiteRT Gemma model files.
-- **`chroma_db/`**: Persistent vector database.
-- **`chat_sessions/`**: Persistent chat history.
-- **`uploaded_media/`**: Local storage for images and video transcripts.
+## Data & Runtime Directories
+- **`model/`**: Stores the LiteRT Gemma model artifact.
+- **`chroma_db/`**: Local persistent ChromaDB storage.
+- **`chat_sessions/`**: JSONL conversation history files.
+- **`uploaded_media/`**: Local storage for uploaded PDFs, text files, audio, and videos.
+- **`uploaded_images/`**: Local storage for indexed images.
+- **`image_manifest.json`**: Registry for indexed images.
+- **`user_profile.json`**: Local learner profile preferences.
+
+## Dependency Definition
+- **`requirements.txt`**: Python dependency list for Streamlit, LiteRT, ChromaDB, FastEmbed, Faster-Whisper, `imageio-ffmpeg`, and desktop launcher support.

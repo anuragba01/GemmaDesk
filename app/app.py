@@ -7,7 +7,6 @@ and images. The application runs entirely offline using Google's LiteRT and Nomi
 """
 import os
 import sys
-import tempfile
 import warnings
 import logging
 from pathlib import Path

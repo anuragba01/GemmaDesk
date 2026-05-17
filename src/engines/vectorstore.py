@@ -141,7 +141,6 @@ class VectorStoreEngine:
         Returns:
             A list of LangChain Document objects representing past chat blocks.
         """
-        from langchain_core.documents import Document
         try:
             where_filter = {
                 "$and": [

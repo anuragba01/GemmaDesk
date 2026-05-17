@@ -134,19 +134,6 @@ class IntentGateway:
             log.warning(f"Gateway summary check failed: {e}")
             return False
 
-    def _cosine_similarity(self, vec_a, vec_b):
-        """
-        Computes the cosine similarity between two vectors.
-        
-        Args:
-            vec_a: First vector (numpy array).
-            vec_b: Second vector (numpy array).
-            
-        Returns:
-            float: The cosine similarity score.
-        """
-        return np.dot(vec_a, vec_b) / (np.linalg.norm(vec_a) * np.linalg.norm(vec_b) + 1e-10)
-
     def is_confused(self, query: str, threshold: float = 0.85) -> bool:
         """
         Checks if the user query indicates confusion or frustration.

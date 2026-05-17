@@ -10,9 +10,9 @@ import tempfile
 import subprocess
 import logging
 import re
+from statistics import mean
 import imageio_ffmpeg
 from langchain_core.documents import Document
-from rag import prompts
 
 log = logging.getLogger("rag.media")
 
@@ -78,6 +78,49 @@ class MediaEngine:
             ))
         return docs
 
+    def _is_reliable_transcript(self, segments: list, info) -> bool:
+        if not segments:
+            return False
+
+        texts = [" ".join(seg.text.lower().split()) for seg in segments if seg.text.strip()]
+        if not texts:
+            return False
+
+        avg_no_speech = mean(seg.no_speech_prob for seg in segments)
+        avg_logprob = mean(seg.avg_logprob for seg in segments)
+        repeated_ratio = 1 - (len(set(texts)) / len(texts)) if len(texts) > 1 else 0.0
+        words = " ".join(texts).split()
+        unique_word_ratio = (len(set(words)) / len(words)) if words else 0.0
+        speech_ratio = (info.duration_after_vad / info.duration) if info.duration else 0.0
+
+        if avg_no_speech >= 0.7:
+            return False
+        if speech_ratio <= 0.1:
+            return False
+        if repeated_ratio >= 0.6 and unique_word_ratio <= 0.4:
+            return False
+        if avg_logprob <= -1.0 and avg_no_speech >= 0.5:
+            return False
+        return True
+
+    def _transcribe(self, path: str):
+        model = self._get_whisper()
+        segments, info = model.transcribe(
+            path,
+            vad_filter=True,
+            initial_prompt=None,
+        )
+        segments = list(segments)
+        if not self._is_reliable_transcript(segments, info):
+            log.warning(
+                "Rejected unreliable transcript for %s (segments=%d, speech_ratio=%.2f).",
+                path,
+                len(segments),
+                (info.duration_after_vad / info.duration) if info.duration else 0.0,
+            )
+            return [], info
+        return segments, info
+
     def ingest_audio(self, path: str) -> int:
         """
         Transcribes an audio file and sends the segments to the DocumentEngine for indexing.
@@ -89,8 +132,10 @@ class MediaEngine:
             int: The number of transcript chunks indexed.
         """
         log.info("Transcribing audio: %s", path)
-        model = self._get_whisper()
-        segments, info = model.transcribe(path, initial_prompt=prompts.WHISPER_INITIAL_PROMPT)
+        segments, _ = self._transcribe(path)
+        if not segments:
+            log.info("No reliable speech transcript detected for audio: %s", path)
+            return 0
         docs = self._segments_to_docs(segments, path, "audio")
         log.info("Audio transcribed: %d segment(s).", len(docs))
         return self.doc_engine.index_docs(docs)
@@ -115,8 +160,10 @@ class MediaEngine:
                 check=True, capture_output=True,
             )
             log.info("ffmpeg audio extraction done.")
-            model = self._get_whisper()
-            segments, info = model.transcribe(tmp_wav, initial_prompt=prompts.WHISPER_INITIAL_PROMPT)
+            segments, _ = self._transcribe(tmp_wav)
+            if not segments:
+                log.info("No reliable speech transcript detected for video: %s", path)
+                return 0
             docs = self._segments_to_docs(segments, path, "video")
             log.info("Video transcribed: %d segment(s).", len(docs))
             return self.doc_engine.index_docs(docs)

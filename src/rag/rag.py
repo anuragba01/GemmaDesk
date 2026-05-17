@@ -8,6 +8,7 @@ the Multimodal LLM (Gemma), and the various data engines (Document, Media, Visio
 import os
 import logging
 import re
+from statistics import mean
 
 from engines.document import DocumentEngine
 from engines.vectorstore import VectorStoreEngine
@@ -68,7 +69,6 @@ class MultimodalRAG:
         self.media_engine = media_engine
         self.gemma_engine = gemma_engine
         self.gateway = IntentGateway(self.vector_store.embeddings)
-        self.image_paths = self.vision_engine.get_valid_images()
 
     def _build_media_durations(self, media_paths: list) -> dict:
         durations = {}
@@ -80,6 +80,41 @@ class MultimodalRAG:
 
     def _is_media_path(self, path: str) -> bool:
         return path.endswith((".mp4", ".mov", ".avi", ".mp3", ".wav"))
+
+    def _audio_transcript_fallback(self, target_media: list, docs: list) -> str | None:
+        audio_paths = [p for p in target_media if p.endswith((".mp3", ".wav"))]
+        if not audio_paths:
+            return None
+
+        audio_docs = [doc for doc in docs if doc.metadata.get("source") in audio_paths]
+        if not audio_docs:
+            return (
+                "I could not extract a reliable speech transcript from the selected audio. "
+                "It may be music, noise, or otherwise non-speech content."
+            )
+
+        texts = []
+        for doc in audio_docs:
+            text = re.sub(r"^\[\d{2}:\d{2}\]\s*", "", doc.page_content).strip().lower()
+            if text:
+                texts.append(" ".join(text.split()))
+
+        if not texts:
+            return (
+                "I could not extract a reliable speech transcript from the selected audio. "
+                "It may be music, noise, or otherwise non-speech content."
+            )
+
+        repeated_ratio = 1 - (len(set(texts)) / len(texts)) if len(texts) > 1 else 0.0
+        words = " ".join(texts).split()
+        unique_word_ratio = (len(set(words)) / len(words)) if words else 0.0
+        avg_chars = mean(len(text) for text in texts)
+        if repeated_ratio >= 0.3 and unique_word_ratio <= 0.25 and avg_chars < 160:
+            return (
+                "The stored transcript for this audio does not look reliable. "
+                "It may be music, noise, or a hallucinated transcription, so I cannot answer confidently from it."
+            )
+        return None
 
     def _detect_media_need(self, question: str) -> str:
         lowered = question.lower()
@@ -264,67 +299,6 @@ class MultimodalRAG:
             "sources": self._source_names(docs, image_paths),
         }
 
-    def query(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, session_id: str = None) -> dict:
-        log.info("query: '%s'", question[:80])
-        text_paths, image_paths = self._split_selected_paths(filter_paths)
-
-        docs = []
-        explicit_times = extract_seconds(question)
-        target_media = [p for p in text_paths if self._is_media_path(p)] if text_paths else []
-        target_videos = [p for p in target_media if p.endswith((".mp4", ".mov", ".avi"))]
-        media_need = self._detect_media_need(question)
-        skip_gateway = bool(explicit_times and target_media)
-        if text_paths:
-            try:
-                if skip_gateway and target_media:
-                    docs = self._get_timestamp_context_docs(target_media, explicit_times)
-                if not docs:
-                    docs = self._retrieve_text_docs(question, filter_paths=text_paths)
-            except Exception as e:
-                log.warning("Text retrieval failed: %s", e)
-
-        media_durations = self._build_media_durations(target_media)
-        duration_error = self._validate_explicit_timestamps(explicit_times, media_durations, target_media)
-        if duration_error:
-            return {
-                "answer": duration_error,
-                "sources": [os.path.basename(p) for p in target_media],
-            }
-        
-        if explicit_times:
-            if not target_media:
-                return {
-                    "answer": "Please select a specific media file from the sidebar to answer timestamp questions.",
-                    "sources": []
-                }
-            for media_path in target_media:
-                if not os.path.exists(media_path):
-                    return {
-                        "answer": "Media file is removed from storage, please upload again.",
-                        "sources": []
-                    }
-            timestamp_docs = self._get_timestamp_context_docs(target_media, explicit_times)
-            docs = self._merge_docs(timestamp_docs, docs)
-            if media_need in {"visual", "audio", "multimodal"} and target_videos:
-                for video in target_videos:
-                    for ts in explicit_times:
-                        clips = self.media_engine.extract_clip(video, ts - 5, ts + 10)
-                        if clips:
-                            image_paths.extend(clips)
-                            log.info("Extracted explicit support clips at %ss: %s", ts, clips)
-                            break
-                    if image_paths:
-                        break
-
-        # --- Long-term chat memory via RAG (Addition 2a) ---
-        if session_id:
-            chat_docs = self.vector_store.search_chat_history(question, session_id, k=4)
-            if chat_docs:
-                log.info("Prepending %d chat history block(s) from RAG.", len(chat_docs))
-                docs = chat_docs + docs
-
-        return self._answer(question, history, docs, image_paths, user_profile, media_durations, not skip_gateway)
-
     def query_stream(self, question: str, filter_paths: list = None, history: list = None, user_profile: dict = None, fetch_full: bool = False, session_id: str = None) -> dict:
         """
         The main entry point for the Streamlit UI to ask questions.
@@ -373,6 +347,15 @@ class MultimodalRAG:
             return {
                 "stream": duration_error_stream(),
                 "sources": [os.path.basename(p) for p in target_media],
+            }
+
+        audio_fallback = self._audio_transcript_fallback(target_media, docs)
+        if audio_fallback:
+            def audio_fallback_stream():
+                yield audio_fallback
+            return {
+                "stream": audio_fallback_stream(),
+                "sources": [os.path.basename(p) for p in target_media if p.endswith((".mp3", ".wav"))],
             }
         
         if explicit_times:
@@ -429,7 +412,6 @@ class MultimodalRAG:
         }
 
     def get_stats(self) -> dict:
-        self.image_paths = self.vision_engine.get_valid_images()
         return {
             "text_chunks": self.vector_store.get_stats(),
             "images": self.vision_engine.get_stats(),
@@ -438,11 +420,9 @@ class MultimodalRAG:
     def get_source_map(self) -> dict:
         mapping = self.vector_store.get_source_map()
         mapping.update(self.vision_engine.get_source_map())
-        self.image_paths = self.vision_engine.get_valid_images()
         return mapping
 
     def clear_all(self):
         log.info("Clearing all indexed data...")
         self.vector_store.clear()
         self.vision_engine.clear()
-        self.image_paths = []
