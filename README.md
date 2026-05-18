@@ -44,6 +44,67 @@ graph TD
 - **RAG Orchestrator:** The central brain coordinating context retrieval across Vision, Media, and Document engines.
 - **LiteRT Engine:** An optimized local inference layer for the 4-bit quantized Gemma model.
 
+## Ingestion Pipeline Design
+
+GemmaDesk processes all file uploads completely locally, routing each file format to its dedicated specialized engine before indexing into standard memory structures.
+
+```mermaid
+flowchart TD
+    subgraph Input ["Source Files"]
+        PDF["📄 PDF / TXT Documents"]
+        AV["🎬 Video (MP4) / Audio (MP3/WAV)"]
+        IMG["🖼️ Images (JPG/PNG)"]
+        CHAT["💬 Chat Conversations"]
+    end
+
+    subgraph Engines ["Local Ingestion Engines"]
+        DocEng["📝 DocumentEngine<br>(Text Extraction & Chunking)"]
+        MediaEng["🔊 MediaEngine<br>(FFmpeg Audio & Whisper Transcription)"]
+        VisionEng["👁️ VisionEngine<br>(Register Image Manifest)"]
+        ChatEng["🧠 ChatHistoryIngestion<br>(Background Chunking every 8 msgs)"]
+    end
+
+    subgraph Storage ["Local Storage & Indexing"]
+        FastEmbed["⚡ FastEmbed Generator<br>(bge-small-en-v1.5)"]
+        Chroma[("🗄️ ChromaDB Vector Store")]
+        Manifest[("📄 image_manifest.json")]
+    end
+
+    %% Ingestion flows
+    PDF --> DocEng
+    DocEng -->|Text Chunks| FastEmbed
+    
+    AV --> MediaEng
+    MediaEng -->|Timed Transcript Chunks| FastEmbed
+    
+    CHAT --> ChatEng
+    ChatEng -->|Conversation Blocks| FastEmbed
+    
+    FastEmbed -->|Generate Vectors| Chroma
+    
+    IMG --> VisionEng
+    VisionEng -->|Register Metadata| Manifest
+```
+
+### 1. Document Pipeline (PDF / TXT)
+*   **Extraction:** The [DocumentEngine](file:///home/anurag/Project/gemmadesk/src/engines/document.py) reads PDFs or plain text, handling Unicode and character mapping errors gracefully.
+*   **Chunking:** Splitting raw text into standard overlapping chunks (500 characters with 100 character overlap) to preserve context.
+*   **Indexing:** Text chunks are vectorized using FastEmbed (`bge-small-en-v1.5`) and stored in ChromaDB.
+
+### 2. Media Pipeline (Video / Audio)
+*   **Audio Demuxing:** The [MediaEngine](file:///home/anurag/Project/gemmadesk/src/engines/media.py) uses `FFmpeg` to extract audio tracks (`.wav` at 16kHz mono) from video containers (`.mp4`, `.mov`, `.avi`).
+*   **Whisper Transcription:** Transcribes audio locally using CPU-quantized Faster-Whisper (`int8`), generating highly precise speech chunks mapped to physical timestamps `[MM:SS]`.
+*   **Indexing:** Transcript segments with metadata (source path, chunk type, and start timestamps) are embedded and saved to ChromaDB.
+
+### 3. Image Pipeline (JPG / PNG)
+*   **Registration:** The [VisionEngine](file:///home/anurag/Project/gemmadesk/src/engines/vision.py) maps and tracks visual items in a local manifest file (`image_manifest.json`).
+*   **Dynamic Loading:** Raw images are preserved in storage to be directly attached as visual tensors inside Gemma's C++ input layer during generation.
+
+### 4. Background Chat Memory Pipeline
+*   **Conversation Tracking:** Chat history is saved line-by-line in high-speed local `.jsonl` files.
+*   **Parallel Vectorization:** Every **8 messages**, a background daemon thread compiles the latest turns, vectorizes them, and indexes them into ChromaDB under `type=chat` and the specific `session_id`.
+*   **Long-Term Memory RAG:** During queries, the orchestrator retrieves matching past chat turns to give the system long-term semantic conversation memory!
+
 ## Getting Started
 
 > **⚠️ IMPORTANT — Clone to your Home Directory**

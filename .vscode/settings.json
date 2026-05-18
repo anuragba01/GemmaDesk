@@ -1,0 +1,20 @@
+{
+    "files.watcherExclude": {
+        "**/build/**": true,
+        "**/dist/**": true,
+        "**/.venv/**": true,
+        "**/model/**": true
+    },
+    "search.exclude": {
+        "**/build": true,
+        "**/dist": true,
+        "**/.venv": true,
+        "**/model": true
+    },
+    "java.import.exclusions": [
+        "**/build/**",
+        "**/dist/**",
+        "**/.venv/**",
+        "**/model/**"
+    ]
+}
