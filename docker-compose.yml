@@ -31,4 +31,8 @@ services:
       # Map user profile settings for persistence
       - ./user_profile.json:/app/user_profile.json
       
+      # Map application source directories for live hot-reloading
+      - ./app:/app/app
+      - ./src:/app/src
+      
     restart: unless-stopped
