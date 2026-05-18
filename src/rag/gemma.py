@@ -62,18 +62,20 @@ class GemmaEngine:
             raise
 
     def _answer_internal(self, payload: dict) -> str:
-        with self.engine.create_conversation() as conv:
-            history = payload.get("history", [])
-            image_paths = payload.get("image_paths", [])
+        history = payload.get("history", [])
+        image_paths = payload.get("image_paths", [])
 
-            for msg in history:
-                # Avoid anchoring a new visual turn to stale assistant text.
-                if image_paths and msg["role"] == "assistant":
-                    continue
-                conv.send_message({
-                    "role": msg["role"],
-                    "content": [{"type": "text", "text": msg["content"]}],
-                })
+        preface_messages = []
+        for msg in history:
+            # Avoid anchoring a new visual turn to stale assistant text.
+            if image_paths and msg["role"] == "assistant":
+                continue
+            preface_messages.append({
+                "role": msg["role"],
+                "content": [{"type": "text", "text": msg["content"]}],
+            })
+
+        with self.engine.create_conversation(messages=preface_messages) as conv:
 
             content = []
             system_text = payload.get("system_text")
@@ -113,19 +115,22 @@ class GemmaEngine:
     def _answer_stream_internal(self, payload: dict):
         print("[GemmaEngine] Entering _answer_stream_internal. Opening C++ conversation session...", flush=True)
         try:
-            with self.engine.create_conversation() as conv:
-                print("[GemmaEngine] C++ conversation session successfully created.", flush=True)
-                history = payload.get("history", [])
-                image_paths = payload.get("image_paths", [])
+            history = payload.get("history", [])
+            image_paths = payload.get("image_paths", [])
 
-                print(f"[GemmaEngine] Hydrating session history with {len(history)} messages...", flush=True)
-                for msg in history:
-                    if image_paths and msg["role"] == "assistant":
-                        continue
-                    conv.send_message({
-                        "role": msg["role"],
-                        "content": [{"type": "text", "text": msg["content"]}],
-                    })
+            preface_messages = []
+            for msg in history:
+                # Avoid anchoring a new visual turn to stale assistant text.
+                if image_paths and msg["role"] == "assistant":
+                    continue
+                preface_messages.append({
+                    "role": msg["role"],
+                    "content": [{"type": "text", "text": msg["content"]}],
+                })
+
+            print(f"[GemmaEngine] Initializing C++ conversation session with {len(preface_messages)} history messages...", flush=True)
+            with self.engine.create_conversation(messages=preface_messages) as conv:
+                print("[GemmaEngine] C++ conversation session successfully created.", flush=True)
 
                 content = []
                 system_text = payload.get("system_text")
