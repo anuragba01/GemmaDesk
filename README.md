@@ -78,6 +78,18 @@ uv pip install -r requirements.txt
 uv run streamlit run app/app.py
 ```
 
+### Alternative: Run via Docker (Windows / macOS / Linux)
+For Windows and macOS users, or if you prefer a single-command setup, you can launch GemmaDesk inside a Docker container. This automatically handles `litert-lm`'s platform constraints.
+
+1. **Start the Application:**
+   ```bash
+   docker compose up --build
+   ```
+2. **Access the App:**
+   Open your browser and navigate to **`http://localhost:8501`**.
+
+> 💡 **Persistent Storage:** The Docker container mounts your local directories. All downloaded AI models (`./model`) and your indexed documents (`./chroma_db`) will be saved directly on your host machine and remain persistent across container runs!
+
 ### 5. First-Time Setup (Automatic)
 On first launch, the app will show a **Setup Manager** screen.
 Click **"Download Missing Models"** and wait for the AI models to download (~3.2 GB total):

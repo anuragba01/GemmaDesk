@@ -20,7 +20,7 @@ Core runtime pieces:
    - long-term chat-memory retrieval
    - multimodal attachment only when needed
 
-## 1. Setup & Installation
+## 1. Setup & Installation (Linux & WSL2 Only)
 
 Create a virtual environment and install dependencies:
 
@@ -30,11 +30,7 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
-Windows activation:
-
-```bash
-.venv\Scripts\activate
-```
+> ⚠️ **macOS Compatibility Limit:** Native macOS source execution is not supported because Google does not package `litert-lm` Python wheels for Darwin. macOS and native Windows users should run the application using **Docker Mode** instead.
 
 
 ## 2. Automated Model Setup
@@ -59,11 +55,24 @@ If any are missing:
 python3 script/launcher.py
 ```
 
-### B. Developer Mode
+### B. Developer Mode (Linux & WSL2)
 
 ```bash
 uv run streamlit run app/app.py
 ```
+
+### C. Docker Mode (Universal / macOS, Windows, Linux)
+
+This is the recommended, zero-config deployment path for Windows, macOS, and containerized Linux. It automatically wraps LiteRT in a lightweight Linux kernel, bypassing platform limits.
+
+1. **Start the environment:**
+   ```bash
+   docker compose up --build
+   ```
+2. **Open the interface:**
+   Go to **`http://localhost:8501`** in your browser.
+
+> 💡 **Data Persistence:** The container maps `./model`, `./chroma_db`, and `./uploaded_images` to your local directories. Downloaded model files persist on the host machine and are not re-downloaded when the container restarts.
 
 
 ## 5. Chat Memory Behavior
@@ -75,6 +84,7 @@ GemmaDesk uses two layers of memory:
 ## Troubleshooting
 
 - **Slow first load:** Initial model loading can take time because Gemma 4, embeddings, and Whisper are loaded locally.
-- **GPU fallback:** GemmaDesk attempts GPU-backed vision inference first. If it fails, LiteRT falls back to CPU automatically.
+- **CPU Backend Forced for Stability:** To prevent silent C++ OpenCL driver deadlocks on systems missing custom graphics packages, GemmaDesk forces all LiteRT vision and audio backends to CPU.
+- **Session Deadlocks (`FAILED_PRECONDITION`):** If a C++ LiteRT session hangs or if you refresh the browser page while the engine is generating a response, the system automatically catches the lock exception, destroys the stale engine, and re-instantiates a clean one automatically to resume operation.
 - **Unreliable audio answers:** If an audio file contains music, noise, or weak speech, GemmaDesk may refuse to answer from it rather than hallucinate a transcript.
 - **Missing directory errors:** Ensure the project root is writable so the app can create `model/`, `chroma_db/`, `uploaded_media/`, `uploaded_images/`, and `chat_sessions/`.

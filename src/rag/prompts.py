@@ -40,9 +40,6 @@ WHISPER_INITIAL_PROMPT = "The following is a technical discussion about GemmaDes
 # Nomic Embed v1.5 requires a specific prefix to distinguish queries from documents.
 EMBED_QUERY_PREFIX = "search_query: "
 
-# Gateway Modifiers
-GATEWAY_CONFUSION_MODIFIER = "[SYSTEM HIDDEN: The user appears confused or frustrated. Shift your tone to be extremely patient. Break down the concept into simpler parts and use a basic analogy.]"
-
 # Ingestion Modifiers
 HARDNESS_CLASSIFICATION_PROMPT = "Analyze this text and return ONLY one word describing its complexity: EASY, MEDIUM, or HARD."
 
