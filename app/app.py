@@ -188,10 +188,11 @@ with st.sidebar:
         type=["pdf", "txt", "mp3", "wav", "mp4", "jpg", "jpeg", "png"],
         accept_multiple_files=True,
         key=f"uploader_{st.session_state.uploader_key}",
+        disabled=st.session_state.get("is_generating", False)
     )
 
     # Process Uploaded Files
-    if st.button("Process Files", type="primary", disabled=not uploaded_files):
+    if st.button("Process Files", type="primary", disabled=not uploaded_files or st.session_state.get("is_generating", False)):
         for uf in uploaded_files:
             ext = Path(uf.name).suffix.lower()
             
@@ -250,7 +251,8 @@ with st.sidebar:
         selected_basenames = st.multiselect(
             "Limit search to specific files:",
             options=list(source_map.keys()),
-            default=[]
+            default=[],
+            disabled=st.session_state.get("is_generating", False)
         )
         selected_paths = [source_map[b] for b in selected_basenames]
     else:
@@ -267,7 +269,7 @@ with st.sidebar:
 
     # Conversation Management
     st.header("Chat Actions")
-    if st.button("New Conversation", use_container_width=True):
+    if st.button("New Conversation", use_container_width=True, disabled=st.session_state.get("is_generating", False)):
         st.session_state.session_id = chat_storage.generate_session_id()
         st.session_state.messages = []
         st.rerun()
@@ -298,7 +300,7 @@ with st.sidebar:
                 title = s["title"]
                 if st.session_state.session_id == s["id"]:
                     title = f"👉 {title}"
-                if st.button(title, key=s["id"], use_container_width=True):
+                if st.button(title, key=s["id"], use_container_width=True, disabled=st.session_state.get("is_generating", False)):
                     st.session_state.session_id = s["id"]
                     st.session_state.messages = chat_storage.load_session(s["id"])
                     st.rerun()
@@ -308,7 +310,7 @@ with st.sidebar:
     st.divider()
 
     with st.expander("Danger Zone"):
-        if st.button("Clear All Indexed Data", type="secondary"):
+        if st.button("Clear All Indexed Data", type="secondary", disabled=st.session_state.get("is_generating", False)):
             rag.clear_all()
             st.session_state.messages = []
             st.success("Cleared!")
