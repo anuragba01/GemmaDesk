@@ -28,8 +28,11 @@ MODEL_PATH = "./model/gemma-4-E4B-it.litertlm"
 
 def extract_seconds(text: str) -> list[int]:
     """Parses timestamps like '1 min 50 sec', '1:50', '30s' from text."""
+    # Clean ordinals like '10th', '1st', '2nd', '3rd' to just numbers
+    cleaned_text = re.sub(r'\b(\d+)(?:st|nd|rd|th)\b', r'\1', text, flags=re.IGNORECASE)
+    
     pattern = r'(?:(\d+)\s*(?:min(?:ute)?s?|m))?\s*(?:and\s*)?(?:(\d+)\s*(?:sec(?:ond)?s?|s))?'
-    matches = re.finditer(pattern, text, re.IGNORECASE)
+    matches = re.finditer(pattern, cleaned_text, re.IGNORECASE)
     
     times = []
     for match in matches:
@@ -41,7 +44,7 @@ def extract_seconds(text: str) -> list[int]:
             times.append(total)
             
     pattern2 = r'(\d{1,2}):(\d{2})'
-    for match in re.finditer(pattern2, text):
+    for match in re.finditer(pattern2, cleaned_text):
         m, s = match.groups()
         times.append(int(m) * 60 + int(s))
         
