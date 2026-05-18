@@ -3,7 +3,7 @@ app.py - GemmaDesk Main Entry Point
 
 This is a Streamlit application that provides a multimodal RAG (Retrieval-Augmented Generation) 
 interface. It allows users to upload documents (PDF, TXT), audio/video (transcribed via Whisper), 
-and images. The application runs entirely offline using Google's LiteRT and Nomic embeddings.
+and images. The application runs entirely offline using Google's LiteRT and BGE embeddings.
 """
 import os
 import sys
@@ -19,7 +19,7 @@ def resolve_asset_path(filename: str) -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "asset", filename))
 
 logo_path = resolve_asset_path("gemmalogocrop.png")
-st.set_page_config(page_title="GemmaDesk", layout="wide", page_icon=logo_path)
+st.set_page_config(page_title="GemmaDesk", layout="wide", page_icon=logo_path, initial_sidebar_state="expanded")
 
 # Suppress transformer verbosity before imports to keep the logs clean
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
@@ -34,9 +34,8 @@ import setup
 missing_deps = setup.check_dependencies()
 if missing_deps:
     setup.render_setup_page(missing_deps)
-    st.stop() # Halts app.py execution until all dependencies are downloaded
+    st.stop()
 
-# -- Now it is safe to import the heavy engines --
 from engines.document import DocumentEngine
 from engines.vectorstore import VectorStoreEngine
 from rag.gemma import GemmaEngine
@@ -60,21 +59,39 @@ log = logging.getLogger("gemmadesk.app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
-# Hide Streamlit's default toolbar (Stop, Deploy, 3-dot menu) for a clean UI
+# Hide Streamlit's default toolbar, Deploy button, and completely disable/hide sidebar folding/unfolding controls
 st.markdown("""
-    <style>
-        /* Hide the entire top-right toolbar: Stop, Deploy, and ⋮ menu */
-        [data-testid="stToolbar"],
-        [data-testid="stDecoration"],
-        header[data-testid="stHeader"] {
-            visibility: hidden !important;
-            height: 0 !important;
-        }
-        /* Also hide the status widget (running indicator) */
-        [data-testid="stStatusWidget"] {
-            visibility: hidden !important;
-        }
-    </style>
+<style>
+/* Hide Deploy button */
+.stAppDeployButton {
+    display: none !important;
+}
+
+/* Hide top-right toolbar only */
+[data-testid="stToolbar"] {
+    visibility: hidden !important;
+}
+
+/* Completely hide the sidebar expand button (>) when collapsed */
+[data-testid="collapsedControl"] {
+    display: none !important;
+}
+
+/* Completely hide the sidebar collapse button (<<) when expanded */
+[data-testid="stSidebar"] button[data-testid="baseButton-headerNoPadding"],
+[data-testid="stSidebar"] button[data-testid="baseButton-header"],
+[data-testid="stSidebar"] [data-testid*="CollapseButton"],
+[data-testid="stSidebarHeader"] button,
+[data-testid="stSidebar"] button[aria-label*="Collapse"],
+[data-testid="stSidebar"] button[aria-label*="collapse"] {
+    display: none !important;
+}
+
+/* Keep header space intact */
+[data-testid="stHeader"] {
+    background: transparent !important;
+}
+</style>
 """, unsafe_allow_html=True)
 
 @st.cache_resource(show_spinner="Loading RAG engine...")

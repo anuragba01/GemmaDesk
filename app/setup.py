@@ -1,4 +1,5 @@
 import os
+import sys
 import streamlit as st
 import time
 
@@ -7,7 +8,6 @@ FASTEMBED_CACHE = os.path.expanduser("~/.cache/fastembed_models")
 GEMMA_MODEL_LABEL = "Gemma 4 LiteRT Model (3.5+ GB)"
 
 def resolve_asset_path(filename: str) -> str:
-    import sys
     if getattr(sys, "frozen", False):
         return os.path.join(sys._MEIPASS, "asset", filename)
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "asset", filename))
@@ -20,7 +20,6 @@ def check_dependencies() -> list:
     missing = []
     
     # Check Gemma Model
-    import sys
     if getattr(sys, "frozen", False):
         gemma_path = os.path.abspath(os.path.join("model", "gemma-4-E4B-it.litertlm"))
     else:
@@ -52,7 +51,6 @@ def render_setup_page(missing_deps: list):
         <style>
             [data-testid="stToolbar"],
             [data-testid="stDecoration"],
-            header[data-testid="stHeader"],
             [data-testid="stStatusWidget"] {
                 visibility: hidden !important;
                 height: 0 !important;

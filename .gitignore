@@ -22,3 +22,4 @@ dist/
 *.spec
 *.AppImage
 appimagetool
+gemmadesk.appimage

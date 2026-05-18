@@ -107,6 +107,18 @@ flowchart TD
 
 ## Getting Started
 
+### 🚀 Standalone AppImage (Fastest, No Install)
+If you are on Ubuntu/Debian Linux, you can run the pre-compiled, fully self-contained portable AppImage immediately without cloning or installing dependencies:
+1. **Download the AppImage:** [**Download GemmaDesk AppImage (v1.0.0)**](https://github.com/anuragba01/GemmaDesk/releases/tag/v1.0.0)
+2. **Launch in one click or terminal:**
+   ```bash
+   chmod +x gemmadesk.appimage && ./gemmadesk.appimage
+   ```
+
+---
+
+### Run from Source
+
 > **⚠️ IMPORTANT — Clone to your Home Directory**
 > The AI model uses memory-mapping to load efficiently. Always clone and run GemmaDesk from your **home directory** (`~/`), not from an external drive or USB stick, to avoid load errors.
 
