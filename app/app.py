@@ -12,6 +12,15 @@ import logging
 from pathlib import Path
 import streamlit as st
 
+def resolve_asset_path(filename: str) -> str:
+    import sys
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, "asset", filename)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "asset", filename))
+
+logo_path = resolve_asset_path("gemmalogocrop.png")
+st.set_page_config(page_title="GemmaDesk", layout="wide", page_icon=logo_path)
+
 # Suppress transformer verbosity before imports to keep the logs clean
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -40,20 +49,16 @@ from engines.chat_ingestion import ChatHistoryIngestion
 import threading
 
 # Global configurations and logging setup
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    force=True,
+)
 warnings.filterwarnings("ignore")
 log = logging.getLogger("gemmadesk.app")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("transformers").setLevel(logging.ERROR)
-
-def resolve_asset_path(filename: str) -> str:
-    import sys
-    if getattr(sys, "frozen", False):
-        return os.path.join(sys._MEIPASS, "asset", filename)
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "asset", filename))
-
-logo_path = resolve_asset_path("gemmalogocrop.png")
-
-st.set_page_config(page_title="GemmaDesk", layout="wide", page_icon=logo_path)
 
 # Hide Streamlit's default toolbar (Stop, Deploy, 3-dot menu) for a clean UI
 st.markdown("""
@@ -121,6 +126,13 @@ user_profile = profile.load_profile()
 # --- Chat Session Initialization ---
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
+    # EXTERNAL RESET: If we hit this block, it means the user hard-refreshed the page.
+    # We must explicitly reset the cached GemmaEngine to clear any stuck C++ session locks.
+    if hasattr(rag.gemma_engine, "reset"):
+        rag.gemma_engine.reset()
+    else:
+        # If hot-reloading from an old cached class without the method, force wipe the cache.
+        st.cache_resource.clear()
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = chat_storage.generate_session_id()
@@ -142,6 +154,9 @@ if "pending_question" not in st.session_state:
 
 if "active_stream" not in st.session_state:
     st.session_state.active_stream = None
+
+if "is_generating" not in st.session_state:
+    st.session_state.is_generating = False
 
 # --- Sidebar UI ---
 with st.sidebar:
@@ -395,6 +410,18 @@ if st.session_state.get("pending_question"):
     st.session_state.pending_question = None
 
 if question:
+    print(f">>> [UI] USER QUERY RECEIVED: '{question}'", flush=True)
+    # If the user sent a new query while an active generation was still running,
+    # it means Streamlit aborted the previous run. Proactively cancel and reset.
+    if st.session_state.get("is_generating", False):
+        print("Active generation was interrupted by a new query! Actively terminating old processes...", flush=True)
+        if hasattr(rag, "media_engine") and hasattr(rag.media_engine, "kill_active_processes"):
+            rag.media_engine.kill_active_processes()
+        if hasattr(rag, "gemma_engine") and hasattr(rag.gemma_engine, "reset"):
+            rag.gemma_engine.reset()
+
+    st.session_state.is_generating = True
+
     # Add user message to history and UI
     st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
@@ -410,6 +437,7 @@ if question:
                 if not selected_paths and not rag.get_stats()["text_chunks"] and not rag.get_stats()["images"]:
                     st.info("No documents are currently indexed. I will answer based on my general knowledge.")
                 
+                print(f"[RAG] Invoking RAG with filters: {selected_paths}", flush=True)
                 # Call the RAG orchestrator for a streaming response
                 result = rag.query_stream(
                     question,
@@ -421,10 +449,12 @@ if question:
                     session_id=st.session_state.session_id,
                 )
 
+                print("[RAG] Stream obtained. Writing typewriter response...", flush=True)
                 # Use Streamlit's native streaming for a typewriter effect
-                st.session_state.active_stream = result["stream"]
+                st.session_state.active_stream = block_stream = result["stream"]
                 full_response = st.write_stream(st.session_state.active_stream)
                 st.session_state.active_stream = None
+                print(f"[RAG] Response fully streamed. Length: {len(full_response)} characters", flush=True)
                 
                 if result.get("sources"):
                     st.caption("Sources: " + ", ".join(result["sources"]))
@@ -460,3 +490,5 @@ if question:
                 err = f"Error: {e}"
                 st.error(err)
                 st.session_state.messages.append({"role": "assistant", "content": err})
+            finally:
+                st.session_state.is_generating = False

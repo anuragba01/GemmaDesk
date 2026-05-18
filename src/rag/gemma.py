@@ -25,34 +25,43 @@ class GemmaEngine:
         Args:
             model_path (str): The file path to the Gemma model.
         """
+        self.model_path = model_path
+        self._load_engine()
+
+    def _load_engine(self):
         log.info("Loading LiteRT engine (Gemma 4)...")
         litert_lm.set_min_log_severity(litert_lm.LogSeverity.ERROR)
         try:
             self.engine = litert_lm.Engine(
-                model_path,
-                audio_backend=litert_lm.Backend.CPU,
-                vision_backend=litert_lm.Backend.GPU,
-            )
-            log.info("Gemma engine ready (GPU vision backend).")
-        except Exception:
-            log.warning("GPU backend unavailable. Falling back to CPU for all backends.")
-            self.engine = litert_lm.Engine(
-                model_path,
+                self.model_path,
                 audio_backend=litert_lm.Backend.CPU,
                 vision_backend=litert_lm.Backend.CPU,
             )
-            log.info("Gemma engine ready (CPU fallback).")
+            log.info("Gemma engine ready (CPU backend).")
+        except Exception as e:
+            log.error(f"Failed to load Gemma engine: {e}")
+            raise
+
+    def reset(self):
+        """Forcefully destroys the current engine and re-instantiates it to clear deadlocks."""
+        log.warning("Force resetting Gemma engine to clear stale session locks...")
+        self.engine = None
+        self._load_engine()
 
     def answer(self, payload: dict) -> str:
         """
         Generates a complete, synchronous response from the Gemma model.
-        
-        Args:
-            payload (dict): A dictionary containing 'history', 'system_text', 'prompt_text', and 'image_paths'.
-            
-        Returns:
-            str: The generated text response.
         """
+        try:
+            return self._answer_internal(payload)
+        except Exception as e:
+            if "session already exists" in str(e).lower() or "FAILED_PRECONDITION" in str(e):
+                log.warning("Caught session deadlock in answer(). Resetting engine and retrying...")
+                self.reset()
+                return self._answer_internal(payload)
+            raise
+
+    def _answer_internal(self, payload: dict) -> str:
         with self.engine.create_conversation() as conv:
             history = payload.get("history", [])
             image_paths = payload.get("image_paths", [])
@@ -90,49 +99,69 @@ class GemmaEngine:
     def answer_stream(self, payload: dict):
         """
         Generates a streaming response from the Gemma model.
-        
-        Args:
-            payload (dict): A dictionary containing 'history', 'system_text', 'prompt_text', and 'image_paths'.
-            
-        Yields:
-            str: Chunks of the generated text response.
         """
-        with self.engine.create_conversation() as conv:
-            history = payload.get("history", [])
-            image_paths = payload.get("image_paths", [])
+        try:
+            yield from self._answer_stream_internal(payload)
+        except Exception as e:
+            if "session already exists" in str(e).lower() or "FAILED_PRECONDITION" in str(e):
+                log.warning("Caught session deadlock in answer_stream(). Resetting engine and retrying...")
+                self.reset()
+                yield from self._answer_stream_internal(payload)
+            else:
+                raise
 
-            for msg in history:
-                if image_paths and msg["role"] == "assistant":
-                    continue
-                conv.send_message({
-                    "role": msg["role"],
-                    "content": [{"type": "text", "text": msg["content"]}],
-                })
+    def _answer_stream_internal(self, payload: dict):
+        print("[GemmaEngine] Entering _answer_stream_internal. Opening C++ conversation session...", flush=True)
+        try:
+            with self.engine.create_conversation() as conv:
+                print("[GemmaEngine] C++ conversation session successfully created.", flush=True)
+                history = payload.get("history", [])
+                image_paths = payload.get("image_paths", [])
 
-            content = []
-            system_text = payload.get("system_text")
-            prompt_text = payload.get("prompt_text")
-            text_parts = []
-            if system_text:
-                text_parts.append(f"[SYSTEM]\n{system_text}")
-            if prompt_text:
-                text_parts.append(prompt_text)
-            if text_parts:
-                content.append({"type": "text", "text": "\n\n".join(text_parts)})
+                print(f"[GemmaEngine] Hydrating session history with {len(history)} messages...", flush=True)
+                for msg in history:
+                    if image_paths and msg["role"] == "assistant":
+                        continue
+                    conv.send_message({
+                        "role": msg["role"],
+                        "content": [{"type": "text", "text": msg["content"]}],
+                    })
 
-            for media_path in image_paths:
-                ext = media_path.lower().split('.')[-1]
-                if ext in ['wav', 'mp3']:
-                    content.append({"type": "audio", "path": media_path})
+                content = []
+                system_text = payload.get("system_text")
+                prompt_text = payload.get("prompt_text")
+                text_parts = []
+                if system_text:
+                    text_parts.append(f"[SYSTEM]\n{system_text}")
+                if prompt_text:
+                    text_parts.append(prompt_text)
+                if text_parts:
+                    content.append({"type": "text", "text": "\n\n".join(text_parts)})
+
+                print(f"[GemmaEngine] Attaching {len(image_paths)} media assets to the conversation payload...", flush=True)
+                for media_path in image_paths:
+                    ext = media_path.lower().split('.')[-1]
+                    if ext in ['wav', 'mp3']:
+                        content.append({"type": "audio", "path": media_path})
+                    else:
+                        content.append({"type": "image", "path": media_path})
+
+                print("[GemmaEngine] Sending payload async to LiteRT model...", flush=True)
+                stream = conv.send_message_async({"role": "user", "content": content})
+                
+                first_chunk = True
+                try:
+                    for chunk in stream:
+                        if first_chunk:
+                            print("[GemmaEngine] First response chunk received from LiteRT!", flush=True)
+                            first_chunk = False
+                        for item in chunk.get("content", []):
+                            if item.get("type") == "text":
+                                yield item["text"]
+                except GeneratorExit:
+                    print("[GemmaEngine] GeneratorExit detected! Streamlit aborted stream. Releasing C++ session lock...", flush=True)
+                    raise
                 else:
-                    content.append({"type": "image", "path": media_path})
-
-            stream = conv.send_message_async({"role": "user", "content": content})
-            try:
-                for chunk in stream:
-                    for item in chunk.get("content", []):
-                        if item.get("type") == "text":
-                            yield item["text"]
-            except GeneratorExit:
-                log.info("Streamlit aborted stream. Generator explicitly closed. Releasing Litert session lock.")
-                return
+                    print("[GemmaEngine] Stream finished naturally.", flush=True)
+        finally:
+            print("[GemmaEngine] Exited _answer_stream_internal. C++ conversation context destroyed.", flush=True)

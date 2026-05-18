@@ -8,6 +8,7 @@ the Multimodal LLM (Gemma), and the various data engines (Document, Media, Visio
 import os
 import logging
 import re
+import tempfile
 from statistics import mean
 
 from engines.document import DocumentEngine
@@ -229,10 +230,10 @@ class MultimodalRAG:
             ))
         return "\n\n".join(parts)
 
-    def _build_prompt(self, question: str, docs: list, image_paths: list, user_profile: dict = None, media_durations: dict = None, apply_confusion_gateway: bool = True) -> tuple[str, str]:
+    def _build_prompt(self, question: str, docs: list, image_paths: list, user_profile: dict = None, media_durations: dict = None) -> tuple[str, str]:
         """
         Assembles the master prompt sent to the LLM.
-        Order of assembly: User Profile -> System Rules -> Intent Modifiers -> Images -> Context -> Question.
+        Order of assembly: User Profile -> System Rules -> Images -> Context -> Question.
         """
         context = self._build_text_context(docs)
         system_text = prompts.CORE_SYSTEM_PROMPT
@@ -254,10 +255,6 @@ class MultimodalRAG:
                 profile_str += f"- Location/Context: {user_profile['continent']}. Use culturally relevant examples when appropriate.\n"
             system_text = profile_str + "\n" + system_text
 
-        # Gateway Check
-        if apply_confusion_gateway and self.gateway.is_confused(question):
-            system_text += f"\n\n{prompts.GATEWAY_CONFUSION_MODIFIER}"
-
         image_text = ""
         if image_paths:
             filenames = ", ".join(os.path.basename(p) for p in image_paths)
@@ -272,21 +269,21 @@ class MultimodalRAG:
 
     def _source_names(self, docs: list, image_paths: list) -> list:
         sources = {os.path.basename(doc.metadata.get("source", "unknown")) for doc in docs}
+        temp_dir = os.path.normpath(tempfile.gettempdir())
         sources.update(
             os.path.basename(path)
             for path in image_paths
-            if os.path.dirname(os.path.abspath(path)) != "/tmp"
+            if os.path.normpath(os.path.dirname(os.path.abspath(path))) != temp_dir
         )
         return sorted(sources)
 
-    def _answer(self, question: str, history: list, docs: list, image_paths: list, user_profile: dict = None, media_durations: dict = None, apply_confusion_gateway: bool = True) -> dict:
+    def _answer(self, question: str, history: list, docs: list, image_paths: list, user_profile: dict = None, media_durations: dict = None) -> dict:
         system_text, prompt_text = self._build_prompt(
             question,
             docs,
             image_paths,
             user_profile,
             media_durations,
-            apply_confusion_gateway,
         )
         answer = self.gemma_engine.answer({
             "system_text": system_text,
@@ -395,14 +392,17 @@ class MultimodalRAG:
                 # Prepend so they appear before document chunks in the context
                 docs = chat_docs + docs
 
+        print("[RAG] Building prompt...", flush=True)
         system_text, prompt_text = self._build_prompt(
             question,
             docs,
             image_paths,
             user_profile,
             media_durations,
-            not skip_gateway,
         )
+        print(f"[RAG] Prompt constructed. Prompt word count: {len(prompt_text.split())}. System word count: {len(system_text.split())}", flush=True)
+        
+        print("[RAG] Invoking GemmaEngine answer_stream...", flush=True)
         stream = self.gemma_engine.answer_stream({
             "system_text": system_text,
             "prompt_text": prompt_text,
@@ -412,15 +412,18 @@ class MultimodalRAG:
         
         def _cleanup_stream(gen):
             try:
+                print("[RAG] Starting consumption of GemmaEngine generator...", flush=True)
                 yield from gen
+                print("[RAG] Finished consumption of GemmaEngine generator.", flush=True)
             finally:
+                print("[RAG] Generator _cleanup_stream finally block executed. Deleting temp files...", flush=True)
                 for path in clips_to_delete:
                     if os.path.exists(path):
                         try:
                             os.unlink(path)
-                            log.info("Cleaned up temp clip: %s", path)
+                            print(f"Cleaned up temp clip: {path}", flush=True)
                         except Exception as e:
-                            log.error("Failed to delete temp clip %s: %s", path, e)
+                            print(f"Failed to delete temp clip {path}: {e}", flush=True)
 
         return {
             "stream": _cleanup_stream(stream),
