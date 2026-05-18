@@ -1,0 +1,40 @@
+# Exclude git tracking metadata
+.git
+.gitignore
+
+# Exclude local Python virtual environment
+.venv
+venv
+ENV
+
+# Exclude python cache structures
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Exclude heavy AI model weights (they are mapped via volumes)
+model/
+/model
+
+# Exclude database files and local media storages (mapped via volumes)
+chroma_db/
+/chroma_db
+uploaded_images/
+/uploaded_images
+uploaded_media/
+/uploaded_media
+chat_sessions/
+/chat_sessions
+
+# Exclude compiled binaries and packaging artifacts
+build/
+dist/
+*.AppImage
+*.spec
+
+# Exclude local IDE configurations and profiling traces
+.vscode/
+.idea/
+.pytest_cache/
+default.profraw

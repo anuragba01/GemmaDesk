@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  gemmadesk:
+    build: .
+    container_name: gemmadesk_app
+    ports:
+      - "8501:8501"
+    volumes:
+      # Map the model directory so downloaded weights are persisted on the host
+      - ./model:/app/model
+      
+      # Map the database directory for local persistence of indexed documents
+      - ./chroma_db:/app/chroma_db
+      
+      # Map image storage
+      - ./uploaded_images:/app/uploaded_images
+      
+      # Map user-uploaded media files for persistence
+      - ./uploaded_media:/app/uploaded_media
+      
+      # Map chat sessions for persistence
+      - ./chat_sessions:/app/chat_sessions
+      
+      # Cache fastembed models in standard system user cache to prevent re-downloads
+      - ~/.cache/fastembed_models:/root/.cache/fastembed_models
+      
+      # Cache huggingface (Whisper) models to prevent re-downloads
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      
+      # Map user profile settings for persistence
+      - ./user_profile.json:/app/user_profile.json
+      
+    restart: unless-stopped
