@@ -5,7 +5,11 @@ GemmaDesk is a local-first, privacy-focused Retrieval-Augmented Generation (RAG)
 > 🏆 **Google Gemma Hackathon Project**
 > GemmaDesk was proudly developed for the **[Google Gemma 4 Good Hackathon](https://www.kaggle.com/competitions/gemma-4-good-hackathon)** to showcase the power of lightweight, high-performance on-device intelligence in bridging the digital divide for educational equity and data sovereignty.
 
+---
 
+👉 **[Skip straight to the Getting Started / How to Run Guide](#getting-started)**
+
+---
 
 ## The Vision: Democratizing AI for Everyone
 
@@ -107,17 +111,26 @@ flowchart TD
 
 ## Getting Started
 
-### 🚀 Standalone AppImage (Fastest, No Install)
-If you are on Ubuntu/Debian Linux, you can run the pre-compiled, fully self-contained portable AppImage immediately without cloning or installing dependencies:
-1. **Download the AppImage:** [**Download GemmaDesk AppImage (v1.0.0)**](https://github.com/anuragba01/GemmaDesk/releases/tag/v1.0.0)
-2. **Launch in one click or terminal:**
+### 🐳 Run via Docker
+For Windows and macOS users, or if you prefer a single-command setup, you can launch GemmaDesk inside a Docker container. This automatically handles `litert-lm`'s platform constraints.
+
+1. **Clone the Repository & Navigate Inside:**
    ```bash
-   chmod +x gemmadesk.appimage && ./gemmadesk.appimage
+   git clone https://github.com/anuragba01/gemmadesk.git
+   cd gemmadesk
    ```
+2. **Start the Application:**
+   ```bash
+   docker compose up --build
+   ```
+3. **Access the App:**
+   Open your browser and navigate to **`http://localhost:8501`**.
+
+> 💡 **Persistent Storage:** The Docker container mounts your local directories. All downloaded AI models (`./model`) and your indexed documents (`./chroma_db`) will be saved directly on your host machine and remain persistent across container runs!
 
 ---
 
-### Run from Source
+### 💻 Run from Source
 
 > **⚠️ IMPORTANT — Clone to your Home Directory**
 > The AI model uses memory-mapping to load efficiently. Always clone and run GemmaDesk from your **home directory** (`~/`), not from an external drive or USB stick, to avoid load errors.
@@ -127,41 +140,39 @@ Install the required system library (one-time):
 sudo apt install libxcb-cursor0 python3-pip
 ```
 
-### 1. Clone the Repository
+#### 1. Clone the Repository
 ```bash
 git clone https://github.com/anuragba01/gemmadesk.git ~/gemmadesk
 cd ~/gemmadesk
 ```
 
-### 2. Install `uv` (Fast Python Package Manager)
+#### 2. Install `uv` (Fast Python Package Manager)
 ```bash
 pip install uv
 ```
 > `uv` will automatically use the correct Python version. No manual Python install needed.
 
-### 3. Create Environment & Install Dependencies
+#### 3. Create Environment & Install Dependencies
 ```bash
 uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
-### 4. Launch the App
+#### 4. Launch the App
 ```bash
 uv run streamlit run app/app.py
 ```
 
-### Alternative: Run via Docker (Windows / macOS / Linux)
-For Windows and macOS users, or if you prefer a single-command setup, you can launch GemmaDesk inside a Docker container. This automatically handles `litert-lm`'s platform constraints.
+---
 
-1. **Start the Application:**
+### 🚀 Standalone AppImage (Fastest, No Install)
+If you are on Ubuntu/Debian Linux, you can run the pre-compiled, fully self-contained portable AppImage immediately without cloning or installing dependencies:
+1. **Download the AppImage:** [**Download GemmaDesk AppImage (v1.0.0)**](https://github.com/anuragba01/GemmaDesk/releases/tag/v1.0.0)
+2. **Launch in one click or terminal:**
    ```bash
-   docker compose up --build
+   chmod +x gemmadesk.appimage && ./gemmadesk.appimage
    ```
-2. **Access the App:**
-   Open your browser and navigate to **`http://localhost:8501`**.
-
-> 💡 **Persistent Storage:** The Docker container mounts your local directories. All downloaded AI models (`./model`) and your indexed documents (`./chroma_db`) will be saved directly on your host machine and remain persistent across container runs!
 
 ### 5. First-Time Setup (Automatic)
 On first launch, the app will show a **Setup Manager** screen.
