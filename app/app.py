@@ -25,8 +25,9 @@ st.set_page_config(page_title="GemmaDesk", layout="wide", page_icon=logo_path, i
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# Add src to path so we can import our custom engines and utilities
+# Add src and app to path so we can import our custom engines and local modules
 sys.path.append(str(Path(__file__).parent.parent / "src"))
+sys.path.append(str(Path(__file__).parent))
 
 import setup
 
